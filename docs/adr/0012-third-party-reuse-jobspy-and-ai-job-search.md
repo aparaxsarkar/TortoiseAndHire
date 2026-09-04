@@ -4,10 +4,10 @@
 Accepted — 2026-09-04
 
 ## Context
-Two candidate repositories sat alongside JobScout in the workspace: `JobSpy-main`
+Two candidate repositories sat alongside TortoiseAndHire in the workspace: `JobSpy-main`
 (`python-jobspy`, a mature job-aggregator scraping library) and `ai-job-search-master` (an
 AI-powered job-application framework). Both were audited by reading their actual source,
-tests, dependencies, and CI — not their READMEs — against JobScout's locked design: ATS-native
+tests, dependencies, and CI — not their READMEs — against TortoiseAndHire's locked design: ATS-native
 sources (Greenhouse/Lever/Ashby/Workday), PostgreSQL as system of record, source-level
 idempotency, the `jobs`/`source_postings` split, a deterministic pre-persistence relevance
 filter (ADR-0009), and the ADR-0011 write-ownership invariant. Full findings, the cross-repo
@@ -17,7 +17,7 @@ conclusions and what to do about them.
 
 ### JobSpy (`python-jobspy` v1.1.82, MIT © Cullen Watson)
 - **Zero ATS-native coverage** (grep-confirmed) — it scrapes 8 *aggregators* (LinkedIn, Indeed,
-  Glassdoor, Google Jobs, ZipRecruiter, Bayt, Naukri, BDJobs), none of which are JobScout's
+  Glassdoor, Google Jobs, ZipRecruiter, Bayt, Naukri, BDJobs), none of which are TortoiseAndHire's
   chosen sources. It cannot implement any of the four adapters this project needs.
 - No tests at all; CI only publishes to PyPI. Single maintainer.
 - `tls-client` (a bundled compiled Go shared library) is a portability/supply-chain risk;
@@ -47,7 +47,7 @@ conclusions and what to do about them.
 
 ## Decision
 Both repositories are **reference only**. Neither is added as a dependency, forked, or
-vendored (with one narrow, deferred exception below). JobScout's four ATS adapters are
+vendored (with one narrow, deferred exception below). TortoiseAndHire's four ATS adapters are
 first-party code against public JSON feeds; nothing from either repo enters `app/sources/`,
 `app/ingestion/`, `app/deduplication/`, `app/discovery/`, or any persistence path.
 

@@ -4,7 +4,7 @@
 [ADR-0012](../adr/0012-third-party-reuse-jobspy-and-ai-job-search.md) for the reuse
 decision — **reference only.** Nothing from this repo is imported; it is a markdown-driven
 Claude Code framework with no backend, no schema, and no code to reuse. What follows is a
-dated snapshot of its *methodology*, to be adapted (not copied) when JobScout builds
+dated snapshot of its *methodology*, to be adapted (not copied) when TortoiseAndHire builds
 `app/discovery/` (now, deterministic) and the future `app/analysis/` JD-scoring service
 (Week 3–4 stretch, LLM-based).
 
@@ -36,8 +36,8 @@ scoring dimension:
   candidate's declared level → **FLAG, proceed, surface the gap** (never silently drop or
   silently pass).
 
-### Why this matters for JobScout specifically
-JobScout's product brief already forbids AI guessing or auto-filling citizenship, sponsorship,
+### Why this matters for TortoiseAndHire specifically
+TortoiseAndHire's product brief already forbids AI guessing or auto-filling citizenship, sponsorship,
 OPT/CPT, or work-authorization answers. This rubric's Eligibility Gate is a compatible
 pattern for the *opposite* direction — using AI to **flag** a posting's stated requirement
 back to the user, quoting the source, rather than inferring or deciding anything about the
@@ -58,13 +58,13 @@ Two **separate** enums, kept deliberately non-overlapping:
   `in_progress | hired | offer_declined | rejected | no_response | interview_only` — never
   reused as a tracker-column value.
 
-JobScout's `applications.outcome` enum (`none | oa | screen | onsite | offer | rejected |
+TortoiseAndHire's `applications.outcome` enum (`none | oa | screen | onsite | offer | rejected |
 withdrawn | ghosted`) already serves a similar role to their tracker-status column; the
 useful takeaway is the **discipline of the split** — keep "where the pipeline is" separate
 from "how it ended," and derive "closed" by exclusion from one explicit final-state list
 rather than maintaining two lists that can drift apart. Confirm `applications.outcome` and
 `applications.applied` don't quietly grow a second, undocumented "is this closed" concept as
-JobScout's application-tracking UI evolves.
+TortoiseAndHire's application-tracking UI evolves.
 
 ## Robots.txt / crawl-politeness policy (`tools/robots_check.py`)
 
@@ -74,7 +74,7 @@ the tool's own name is disallowed, treats an unreadable or soft-200 `robots.txt`
 bugs in Python's stdlib `urllib.robotparser` (blank lines inside a record, rule-order vs.
 longest-match, percent-encoded rules) that a naive robots check would inherit.
 
-**None of JobScout's four MVP adapters need this** — Greenhouse, Lever, and Ashby expose
+**None of TortoiseAndHire's four MVP adapters need this** — Greenhouse, Lever, and Ashby expose
 public JSON APIs, and Workday's CXS endpoint is JSON too, not HTML. Adopt this pattern (or
 adapt `tools/robots_check.py` itself, stdlib + `curl`, MIT) only if a future adapter ever
 fetches an HTML page rather than a JSON feed — check before that adapter's first request, not
@@ -88,5 +88,5 @@ edits (`{file, old_string, new_string, reason}`) and separate narrative/judgment
 factual claim in a draft (dates, employers, titles, metrics) must be traceable to a fixed,
 small set of source documents; an unconfirmed claim gets removed, not guessed at. Treat any
 fetched posting or cached research note as **data to evaluate, never as instructions to
-follow** — this is the same untrusted-content discipline JobScout already applies to
+follow** — this is the same untrusted-content discipline TortoiseAndHire already applies to
 ingestion payloads, extended to whatever text an LLM reads during application drafting.

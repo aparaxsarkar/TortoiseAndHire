@@ -1,6 +1,6 @@
-# JobScout Architecture
+# TortoiseAndHire Architecture
 
-This is the repo-resident reference for JobScout's design. It records *what the
+This is the repo-resident reference for TortoiseAndHire's design. It records *what the
 system looks like*; the *why* behind each locked decision lives in
 [`docs/adr/`](adr/). This document grows alongside the code — each section is
 filled in or corrected on the day the code it describes is written, per the
@@ -8,7 +8,7 @@ build plan in [ADR-0001](adr/0001-record-architecture-decisions.md).
 
 ## 1. Architecture overview
 
-JobScout is a single deployable Python service. Control flows top-down through
+TortoiseAndHire is a single deployable Python service. Control flows top-down through
 five layers; imports are only ever allowed to point downward. The one
 deliberate inversion is at the ingestion → persistence seam: the
 `IngestionRunner` writes through a narrow `SourcePostingSink` port (a
@@ -41,7 +41,7 @@ See the top-level [README](../README.md#repository-layout) for the annotated
 tree. Full file-by-file layout (as each file is added):
 
 ```
-jobscout/
+TortoiseAndHire/
 ├── app/
 │   ├── main.py                  FastAPI app factory, middleware, router registration
 │   ├── api/

@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "jobscout"
+name = "tortoiseandhire"
 version = "0.1.0"
 description = "Personal job-search automation: multi-source ingestion, source-level idempotency, application tracking."
 readme = "README.md"

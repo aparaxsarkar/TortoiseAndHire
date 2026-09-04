@@ -4,12 +4,12 @@
 Accepted — 2026-09-04
 
 ## Context
-JobScout's design was worked out in full before any code was written: architecture,
+TortoiseAndHire's design was worked out in full before any code was written: architecture,
 repository layout, module boundaries, PostgreSQL schema, ingestion/idempotency design,
 relevance filtering, API design, Excel export/import, deployment, CI/CD and testing plan,
 and a 2-week MVP schedule. That design lives as a published reference:
 
-> **JobScout Blueprint** — https://claude.ai/code/artifact/b8403e88-6927-4187-8c24-08c9174e92ee
+> **TortoiseAndHire Blueprint** — https://claude.ai/code/artifact/b8403e88-6927-4187-8c24-08c9174e92ee
 
 Eleven decisions from that process are locked and are recorded as their own ADRs
 (0002–0011, each added the day its code lands, per the build plan below) plus the

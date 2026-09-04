@@ -1,4 +1,8 @@
-# JobScout
+# TortoiseAndHire
+
+*The hare naps and still loses. Here, you get to nap and still win —
+TortoiseAndHire keeps discovering, filtering, and tracking jobs while you're
+away from the keyboard.*
 
 A personal job-search automation platform: discovers postings from ATS feeds
 (Greenhouse, Lever, Ashby, Workday), stores them in PostgreSQL with

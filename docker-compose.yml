@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: jobscout
-      POSTGRES_PASSWORD: jobscout
-      POSTGRES_DB: jobscout
+      POSTGRES_USER: tortoiseandhire
+      POSTGRES_PASSWORD: tortoiseandhire
+      POSTGRES_DB: tortoiseandhire
     ports:
       - "5432:5432"
     volumes:
-      - jobscout-postgres-data:/var/lib/postgresql/data
+      - tortoiseandhire-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jobscout -d jobscout"]
+      test: ["CMD-SHELL", "pg_isready -U tortoiseandhire -d tortoiseandhire"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -21,7 +21,7 @@ services:
       dockerfile: docker/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://jobscout:jobscout@postgres:5432/jobscout
+      DATABASE_URL: postgresql+psycopg://tortoiseandhire:tortoiseandhire@postgres:5432/tortoiseandhire
     ports:
       - "8000:8000"
     depends_on:
@@ -29,4 +29,4 @@ services:
         condition: service_healthy
 
 volumes:
-  jobscout-postgres-data:
+  tortoiseandhire-postgres-data:
