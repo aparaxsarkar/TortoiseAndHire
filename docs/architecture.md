@@ -177,6 +177,14 @@ Coverage gates: ≥ 80% on `app/`, ≥ 95% on `deduplication/`, `discovery/`, an
 correctness-critical core). See §10 of the design blueprint (linked from ADR-0001) for the full
 testing-boundaries table.
 
+**`pip-audit` is visible, not blocking** (`continue-on-error: true` in the `lint` job). It scans
+against a CVE database that changes independently of this repo's commits — a hard-fail gate on it
+means CI can turn red on a day with no code changes at all (this happened for real on Day 1: a
+fresh dependency install already carried unrelated transitive-dependency advisories). It still
+runs on every push so findings are visible in the Actions log; remediation is a deliberate,
+separate decision (bump a pin, or accept and move on), not a merge-blocker tied to someone else's
+database.
+
 ## 11. Not used (deliberately)
 
 Celery/Redis, Kafka/RabbitMQ, Kubernetes, Airflow/Dagster/Prefect, Ray/Spark/Dask,

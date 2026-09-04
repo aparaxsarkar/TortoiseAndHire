@@ -19,7 +19,14 @@ jobs:
       - run: ruff format --check app tests
       - run: mypy
       - run: lint-imports
+      # Visible, not blocking: the CVE database changes independently of our
+      # code, so a hard-fail here means CI can go red on a day with zero
+      # commits (found true on Day 1 - a fresh install already carried
+      # unrelated transitive-dependency advisories). --strict only affects
+      # dependency-*collection* failures, not findings, so it stays on for
+      # honest reporting; continue-on-error is what keeps this advisory.
       - run: pip install pip-audit && pip-audit --strict --skip-editable
+        continue-on-error: true
 
 # test / build / migrations-check jobs are added as the code they exercise
 # lands (see docs/architecture.md §10 for the target pipeline; the daily
