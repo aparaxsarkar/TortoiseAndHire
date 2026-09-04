@@ -1,0 +1,134 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jobscout"
+version = "0.1.0"
+description = "Personal job-search automation: multi-source ingestion, source-level idempotency, application tracking."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "sqlalchemy>=2.0",
+  "alembic>=1.14",
+  "psycopg[binary]>=3.2",
+  "httpx>=0.27",
+  "tenacity>=9.0",
+  "structlog>=24.4",
+  "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.16",
+  "mypy>=1.19",
+  "import-linter>=2.5",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=6.0",
+  "respx>=0.21",
+  "pre-commit>=4.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+# ---------------------------------------------------------------------------
+# ruff — lint + format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+
+# ---------------------------------------------------------------------------
+# mypy — strict on app/, relaxed on tests/
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "."
+files = ["app"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+# ---------------------------------------------------------------------------
+# import-linter — the layer contracts from docs/architecture.md §3.
+# Packages are empty on Day 1; contracts start enforcing from day one so a
+# violation is caught the day the offending import is written, not later.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["app"]
+
+[[tool.importlinter.contracts]]
+name = "Layers: api -> services -> ingestion -> (deduplication|discovery|exports) -> db.repositories -> models"
+type = "layers"
+layers = [
+  "app.api",
+  "app.services",
+  "app.ingestion",
+  "app.deduplication | app.discovery | app.exports",
+  "app.db.repositories",
+  "app.models",
+]
+
+[[tool.importlinter.contracts]]
+name = "core is imported by everything, imports nothing from app"
+type = "forbidden"
+source_modules = ["app.core"]
+forbidden_modules = [
+  "app.api", "app.services", "app.db", "app.models", "app.schemas",
+  "app.sources", "app.ingestion", "app.deduplication", "app.discovery", "app.exports",
+]
+
+[[tool.importlinter.contracts]]
+name = "sources/ have no DB access and no business logic"
+type = "forbidden"
+source_modules = ["app.sources"]
+forbidden_modules = [
+  "app.db", "app.models", "app.services", "app.api",
+  "app.ingestion", "app.deduplication", "app.discovery",
+]
+
+[[tool.importlinter.contracts]]
+name = "deduplication/ and discovery/ are pure: no DB, no services, no api"
+type = "forbidden"
+source_modules = ["app.deduplication", "app.discovery"]
+forbidden_modules = ["app.db", "app.models", "app.services", "app.api"]
+
+[[tool.importlinter.contracts]]
+name = "models/ and db/repositories/ never import services or api (write-ownership + layering, ADR-0011)"
+type = "forbidden"
+source_modules = ["app.models", "app.db.repositories"]
+forbidden_modules = ["app.services", "app.api", "app.sources", "app.ingestion"]
+
+[[tool.importlinter.contracts]]
+name = "api/ never imports repositories, sources, or ingestion internals directly"
+type = "forbidden"
+source_modules = ["app.api"]
+forbidden_modules = ["app.db.repositories", "app.sources", "app.ingestion", "app.deduplication", "app.discovery"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+  "live: hits a real external API; excluded from default CI (see nightly-live.yml)",
+]
+
+[tool.coverage.run]
+source = ["app"]
