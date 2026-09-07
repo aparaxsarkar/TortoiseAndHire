@@ -146,7 +146,27 @@ reasoning behind each one (ADR-0002 idempotency, ADR-0009 relevance, ADR-0011 wr
 | `errors.TortoiseError` | `Exception` | Root of the first-party exception hierarchy. |
 
 Entrypoint: `app.main.create_app(settings=None) -> FastAPI`; `app.main:app` is the uvicorn target.
-Routes so far: `GET /api/v1/health` (liveness only; readiness with a DB ping is added day 3).
+Routes so far: `GET /api/v1/health` (liveness), `GET /api/v1/health/ready` (503 if the DB is
+unreachable).
+
+### `schemas/`, `deduplication/`, `discovery/`, `db/repositories/` (day 4)
+
+| Symbol | Signature | Notes |
+|---|---|---|
+| `schemas.canonical.CanonicalPosting` | pydantic model | The normalised posting; the only thing that leaves `sources/`. `RawPosting` is the pre-parse form. |
+| `deduplication.url_canonical.canonicalize_url` | `(str) -> str` | Lowercase scheme/host, drop default port + fragment + tracking params, sort params, trim trailing slash. Deterministic, idempotent. |
+| `deduplication.identity.derive` | `(CanonicalPosting) -> PostingIdentity` | `dedup_key = source_job_id or canonicalized_url`; raises `IdentityError` if neither is usable. |
+| `deduplication.identity.content_hash` | `(CanonicalPosting) -> str` | SHA-256 over the human-meaningful fields; the change signal for the upsert. Ignores `url` and `source_metadata`. |
+| `discovery.ruleset.load_ruleset` | `(path) -> Ruleset` | Parses/validates `config/discovery.yml` (frozen, `extra="forbid"`). No settings dependency. |
+| `discovery.experience.parse_min_years` | `(str \| None) -> int \| None` | Lowest required years, or `None` (biased toward `None` = keep). |
+| `discovery.rules.evaluate` | `(CanonicalPosting, Ruleset) -> RelevanceVerdict` | `matched`, `strength` (`strong`/`weak`), `reasons[]`, `signals{}`, `ruleset_version`. Function match required; seniority checked in the title only; keep-on-ambiguity. |
+| `db.repositories.CompanyRepository.get_or_create` | `(*, normalized_name, name, domain=None) -> Company` | SELECT, else INSERT inside a SAVEPOINT so a lost race falls back to a re-SELECT. |
+| `db.repositories.SourcePostingRepository.upsert` | `(...) -> UpsertOutcome` | `INSERT ... ON CONFLICT (source_id, dedup_key) DO UPDATE`; `INSERTED`/`UPDATED`/`UNCHANGED` from `xmax = 0` + prior-`content_hash` compare. |
+| `db.repositories.FilteredPostingRepository.upsert` | `(...) -> None` | Same idempotency for the reject ledger. |
+| `db.repositories.{SourceRepository, JobRepository}` | small | `get_by_slug`/`list_all`; `add`/`get`. Search lands day 8. |
+
+Repositories take a `Session` in their constructor and hold no other state. They are the
+only code that runs queries (import-linter enforces this).
 
 ## 5. Schema & ERD
 

@@ -1,0 +1,55 @@
+# The relevance ruleset (ADR-0009). Checked in, not a secret. Version-stamped so
+# a change is visible in filtered_postings and so a newer ruleset can be replayed.
+version: "2026-09-07.a"
+
+# Reject if the job description's stated minimum experience exceeds this.
+max_experience_years: 3
+include_internships: true
+
+# The title must map to one of these (case-insensitive substring).
+target_functions:
+  - software engineer
+  - software developer
+  - machine learning engineer
+  - ml engineer
+  - ai engineer
+  - applied scientist
+  - applied ml engineer
+  - data scientist
+  - data engineer
+  - ml platform
+  - ml infrastructure
+  - research engineer
+
+# Corroborating "this is early-career" signals in the title. Not required to
+# keep a posting, but their absence marks the match "weak".
+target_levels:
+  - new grad
+  - new graduate
+  - early career
+  - entry level
+  - entry-level
+  - junior
+  - associate
+  - "0-2 years"
+  - "0-3 years"
+
+# Matched in the TITLE only, at a word boundary. Never a description scan.
+exclude_title_tokens:
+  - senior
+  - sr
+  - staff
+  - principal
+  - lead
+  - director
+  - head
+  - manager
+  - vp
+  - recruiter
+
+# Optional. Dumb string / region match against the posting's location fields;
+# never infers work authorisation, visa, or sponsorship. Remote always passes.
+locations:
+  - united states
+  - usa
+  - remote

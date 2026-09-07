@@ -39,7 +39,7 @@ day's ADR if a new locked decision landed.
 | 1 ✓ | Repo harness: `pyproject.toml`, `docker-compose.yml`, `Dockerfile`, `.env.example`, `Makefile`, pre-commit, empty `app/` packages, `ci.yml` (lint), import-linter contracts | **0001** (this file), **0012** |
 | 2 ✓ | `core/`: config, logging, retry, rate-limit, observability; `main.py` + `/health`; CI `test` job | — (`core/retry` is generic infra; the idempotency decision has no code here yet) |
 | 3 ✓ | DB layer: `db/base`, `session`, all `models/`, first Alembic migration; `/health/ready`; CI Postgres service + migration round-trip + `alembic check` | **0002** (idempotency anchor), **0003** (canonical vs source-posting split), **0011** (write-ownership: FK `RESTRICT`, no triggers) |
-| 4 | Repos + `deduplication/` + `discovery/` | 0009 (relevance filter before persistence) |
+| 4 ✓ | `schemas/canonical`; `deduplication/` (url_canonical, identity, content_hash); `discovery/` (ruleset, experience, rules) + `config/discovery.yml`; repositories (companies get_or_create, source_postings/filtered_postings upsert, sources, jobs); CI coverage gate ≥95% on the pure core | **0009** (relevance filter before persistence) |
 | 5 | `sources/` scaffolding + Greenhouse + Lever adapters | 0004 (adapter boundary, no DB) |
 | 6 | `ingestion/`: runner, pipeline, results | 0004, 0009, 0011 (wired) |
 | 7 | `services/`: `IngestionService`, `JobService.search` | — |
