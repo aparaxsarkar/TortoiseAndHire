@@ -1,0 +1,34 @@
+{
+  "jobs": [
+    {
+      "id": 5001,
+      "internal_job_id": 900123,
+      "title": "Machine Learning Engineer",
+      "updated_at": "2026-08-20T14:30:00-04:00",
+      "requisition_id": "REQ-42",
+      "location": { "name": "Remote - US" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/5001",
+      "departments": [{ "id": 1, "name": "Machine Learning" }],
+      "offices": [{ "id": 7, "name": "New York" }],
+      "content": "&lt;p&gt;Build models. &lt;strong&gt;0-2 yrs&lt;/strong&gt; of experience.&lt;/p&gt;"
+    },
+    {
+      "id": 5002,
+      "internal_job_id": 900124,
+      "title": "Senior Software Engineer",
+      "updated_at": "2026-08-19T09:00:00Z",
+      "location": { "name": "San Francisco, CA" },
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/5002",
+      "departments": [],
+      "offices": [],
+      "content": "&lt;p&gt;5+ years of experience required.&lt;/p&gt;"
+    },
+    {
+      "id": null,
+      "title": "Broken - no id",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/x",
+      "content": ""
+    }
+  ],
+  "meta": { "total": 3 }
+}

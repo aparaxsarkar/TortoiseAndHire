@@ -137,7 +137,7 @@ allow_indirect_imports = "true"
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers -m 'not live'"
 asyncio_mode = "auto"
 markers = [
   "live: hits a real external API; excluded from default CI (see nightly-live.yml)",

@@ -65,10 +65,12 @@ TortoiseAndHire/
 │   │   └── ...                  jobs · applications · ingestion · exports (API DTOs)
 │   ├── services/                jobs · applications · ingestion · discovery · exports · imports — business logic
 │   ├── sources/
-│   │   ├── base.py              JobSource Protocol, SourceQuery, SourceError hierarchy
-│   │   ├── registry.py          slug → adapter factory
-│   │   ├── http.py              shared async httpx client wrapper
-│   │   └── greenhouse.py · lever.py · ashby.py · workday.py
+│   │   ├── base.py              JobSource Protocol, SourceQuery, BaseSource lifecycle
+│   │   ├── errors.py            SourceError taxonomy (Unavailable · RateLimited · Auth · Payload)
+│   │   ├── http.py              shared async httpx wrapper: UA, token bucket, retry, status→error
+│   │   ├── _html.py             minimal HTML → plain text (stdlib only)
+│   │   ├── registry.py          slug → adapter factory (available() · get_source())
+│   │   └── greenhouse.py · lever.py · [ashby.py · workday.py — later]
 │   ├── ingestion/
 │   │   ├── runner.py            IngestionRunner — orchestration, retries, partial failure
 │   │   ├── pipeline.py          normalize → validate → identity → relevance steps
@@ -168,6 +170,24 @@ unreachable).
 Repositories take a `Session` in their constructor and hold no other state. They are the
 only code that runs queries (import-linter enforces this).
 
+### `sources/` (day 5)
+
+Adapters do exactly two things — fetch a board's feed, parse it into `CanonicalPosting` —
+and import only `schemas/canonical` + `core/`. No DB, no relevance, no dedup, no run logic
+(ADR-0004; `import-linter` enforces it).
+
+| Symbol | Signature | Notes |
+|---|---|---|
+| `sources.base.JobSource` | `Protocol` | `slug: ClassVar[str]`; `fetch(SourceQuery) -> AsyncIterator[RawPosting]`; `parse(RawPosting) -> CanonicalPosting`. `runtime_checkable`. |
+| `sources.base.SourceQuery` | pydantic model | `targets: list[str]` — Greenhouse board tokens / Lever account slugs. |
+| `sources.base.BaseSource` | class | Shared HTTP lifecycle: `__init__(http=None)`, `_make_http()` (override for per-source rate limit / base URL), `aclose()`, async context manager. |
+| `sources.http.HttpClient` | `(*, base_url, rate_limit=None, timeout=20, user_agent=UA, retry_attempts=4, retry_backoff=0.5)` | One `httpx.AsyncClient`; honest UA; per-source `TokenBucket`; `tenacity` retry on `SourceUnavailable`; `Retry-After` ≤ 30 s honoured once. `get_json(url, *, params=None) -> Any`. |
+| `sources.errors.SourceError` | `TortoiseError` | Base. `SourceUnavailable` (5xx/timeout — retry), `SourceRateLimited(*, retry_after)` (429), `SourceAuthError` (401/403 — abort run), `SourcePayloadError` (unparseable — skip one). The runner maps each to a pipeline stage (day 6). |
+| `sources.registry.available` | `() -> list[str]` | Sorted registered slugs (`["greenhouse", "lever"]`). |
+| `sources.registry.get_source` | `(slug: str) -> JobSource` | Factory lookup; unknown slug → `SourceError`. The only path from slug to adapter. |
+| `sources.greenhouse.GreenhouseSource` | `slug="greenhouse"` | `boards-api.greenhouse.io/v1/boards/{token}` (+ `/jobs?content=true`). Entity-decodes `content`, derives `remote`/`department` best-effort. |
+| `sources.lever.LeverSource` | `slug="lever"` | `api.lever.co/v0/postings/{account}?mode=json`. Uses `descriptionPlain`/`additionalPlain` directly; `workplaceType` → `remote`. |
+
 ## 5. Schema & ERD
 
 The schema, ERD, and load-bearing constraints are in **[`docs/data-model.md`](data-model.md)**
@@ -217,8 +237,11 @@ Present: **`lint`** (day 1 — ruff, ruff-format, mypy `--strict`, import-linter
 pip-audit) and **`test`** (day 2 — `pytest`; day 3 adds a `postgres:16` service, an
 `alembic upgrade head` / `downgrade base` round-trip, and `alembic check` so the models can
 never drift from the migration). Integration tests under `tests/integration/` skip themselves
-when `DATABASE_URL` is not a reachable `postgresql://` URL. Coverage gates: ≥ 80% on `app/`,
-≥ 95% on `deduplication/`, `discovery/`, and `ingestion/` (the correctness-critical core). See
+when `DATABASE_URL` is not a reachable `postgresql://` URL. Tests marked `@pytest.mark.live`
+(day 5 — adapter smoke tests against real public boards) are excluded by default via
+`-m 'not live'` in `pyproject.toml`; run them explicitly with `pytest -m live`. Coverage
+gates: ≥ 80% on `app/`, ≥ 95% on `deduplication/`, `discovery/`, and `ingestion/` (the
+correctness-critical core). See
 §10 of the design blueprint (linked from ADR-0001) for the full testing-boundaries table.
 
 **`pip-audit` is visible, not blocking** (`continue-on-error: true` in the `lint` job). It scans
