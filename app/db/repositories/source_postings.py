@@ -36,6 +36,15 @@ class SourcePostingRepository:
             )
         ).scalar_one_or_none()
 
+    def job_id_for(self, *, source_id: int, dedup_key: str) -> uuid.UUID | None:
+        """The canonical job this posting already resolves to, if it's been seen."""
+        return self.session.execute(
+            select(SourcePosting.job_id).where(
+                SourcePosting.source_id == source_id,
+                SourcePosting.dedup_key == dedup_key,
+            )
+        ).scalar_one_or_none()
+
     def upsert(
         self,
         *,

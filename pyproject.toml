@@ -112,6 +112,12 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
+name = "ingestion/ is ORM-free: it persists only through its ports (ADR-0011)"
+type = "forbidden"
+source_modules = ["app.ingestion"]
+forbidden_modules = ["app.db", "app.models", "app.services", "app.api"]
+
+[[tool.importlinter.contracts]]
 name = "deduplication/ and discovery/ are pure: no DB, no services, no api"
 type = "forbidden"
 source_modules = ["app.deduplication", "app.discovery"]

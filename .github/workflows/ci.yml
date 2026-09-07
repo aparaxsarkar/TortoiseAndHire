@@ -64,7 +64,7 @@ jobs:
         run: alembic check
       - run: pytest --cov=app --cov-report=term-missing
       - name: Coverage gate - the pure correctness-critical core >= 95%
-        run: coverage report --include='app/deduplication/*,app/discovery/*' --fail-under=95
+        run: coverage report --include='app/deduplication/*,app/discovery/*,app/ingestion/*' --fail-under=95
 
 # build / migrations-check jobs are added as the code they exercise lands -
 # see docs/architecture.md §10 and the build plan in ADR-0001.

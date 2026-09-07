@@ -64,6 +64,7 @@ TortoiseAndHire/
 │   │   ├── canonical.py         RawPosting, CanonicalPosting — the adapter contract
 │   │   └── ...                  jobs · applications · ingestion · exports (API DTOs)
 │   ├── services/                jobs · applications · ingestion · discovery · exports · imports — business logic
+│   │   └── ingestion.py         Repository{SourcePostingSink,FilteredPostingSink,RunStore} — the ORM half of the seam
 │   ├── sources/
 │   │   ├── base.py              JobSource Protocol, SourceQuery, BaseSource lifecycle
 │   │   ├── errors.py            SourceError taxonomy (Unavailable · RateLimited · Auth · Payload)
@@ -71,10 +72,11 @@ TortoiseAndHire/
 │   │   ├── _html.py             minimal HTML → plain text (stdlib only)
 │   │   ├── registry.py          slug → adapter factory (available() · get_source())
 │   │   └── greenhouse.py · lever.py · [ashby.py · workday.py — later]
-│   ├── ingestion/
-│   │   ├── runner.py            IngestionRunner — orchestration, retries, partial failure
-│   │   ├── pipeline.py          normalize → validate → identity → relevance steps
-│   │   └── results.py           IngestionRunResult, PostingOutcome enums
+│   ├── ingestion/               ORM-free: persists only through the ports in ports.py
+│   │   ├── runner.py            IngestionRunner — advisory lock, retry-around-fetch, relevance gate, partial failure, run tally
+│   │   ├── pipeline.py          prepare(raw): parse → identity → relevance → content_hash; PipelineError tags the failing stage
+│   │   ├── ports.py             SourcePostingSink · FilteredPostingSink · RunStore Protocols; PersistOutcome
+│   │   └── results.py           IngestionRunResult (also the ingestion_runs.stats shape) · PostingError
 │   ├── deduplication/
 │   │   ├── identity.py          deterministic (source, source_job_id | url) key
 │   │   ├── url_canonical.py     URL canonicalization rules
@@ -115,16 +117,16 @@ TortoiseAndHire/
 | `discovery/` | Deterministic relevance filter: target-function / seniority / experience match → keep or reject + reason | `schemas/canonical`, `core/config`, stdlib | `db/`, `models/`, `services/`, `ingestion/`, `api/`, SQLAlchemy |
 | `models/` | ORM table definitions, constraints, indexes | `db/base`, SQLAlchemy | `services/`, `api/`, `sources/`, `ingestion/` |
 | `db/repositories/` | CRUD, queries, upsert — *no business rules* | `models/`, `db/session`, `schemas/`, SQLAlchemy | `services/`, `api/`, `sources/`, `ingestion/` |
-| `ingestion/` | Run orchestration: retries, rate-limit, relevance gate, partial failure, run records | `sources/`, `deduplication/`, `discovery/`, `schemas/`, `core/`, the `SourcePostingSink` / `FilteredPostingSink` ports | `api/`, concrete `models/` / ORM sessions |
+| `ingestion/` | Run orchestration: advisory lock, retry-around-fetch, relevance gate, partial failure, run tally; defines its own `SourcePostingSink` / `FilteredPostingSink` / `RunStore` ports | `sources/`, `deduplication/`, `discovery/`, `schemas/`, `core/` | `db/`, `models/`, `services/`, `api/` (it never sees a session) |
 | `services/` | Business logic; wires adapters + repos + runner; owns transactions | `db/repositories/`, `ingestion/`, `deduplication/`, `discovery/`, `exports/`, `sources/registry`, `schemas/`, `core/` | `api/` |
 | `exports/` | Row data ↔ `.xlsx` bytes: write the export, parse an upload | `schemas/exports`, openpyxl | `db/`, `models/`, `services/` |
 | `api/` | HTTP: routing, request/response schemas, auth, error mapping | `services/`, `schemas/`, `core/` | `db/repositories/`, `sources/`, `ingestion/` internals, raw SQL |
 
 **Enforcement** — not aspirational, checked in CI (`make imports`, wired into `.github/workflows/ci.yml`'s `lint` job):
 
-- `import-linter` — layer contracts declared in `pyproject.toml` under `[tool.importlinter]`, mirroring the table above. `lint-imports` fails the build on a violation.
-- `mypy --strict` on `app/` — the `Protocol` seams (`JobSource`, `SourcePostingSink`, `FilteredPostingSink`) are only meaningful if types are checked.
-- **Write-ownership** (ADR-0011) — `import-linter` forbids `app/ingestion/` and the canonical repos from importing the `applications` model; a schema test (added with the DB layer) asserts `pg_trigger` is empty and `applications → jobs` is `ON DELETE RESTRICT`.
+- `import-linter` — 7 contracts declared in `pyproject.toml` under `[tool.importlinter]`, mirroring the table above. `lint-imports` fails the build on a violation. Two are Day-5/6 boundary walls: *"sources/ have no DB access and no business logic"* and *"ingestion/ is ORM-free: it persists only through its ports"* (`app.ingestion` may not import `app.db` / `app.models` / `app.services` / `app.api`).
+- `mypy --strict` on `app/` — the `Protocol` seams (`JobSource`, `SourcePostingSink`, `FilteredPostingSink`, `RunStore`) are only meaningful if types are checked.
+- **Write-ownership** (ADR-0011) — the ORM-free-`ingestion/` contract above is what makes the seam physical: the runner literally cannot reach `applications`. A schema test (DB layer) also asserts `pg_trigger` is empty and `applications → jobs` is `ON DELETE RESTRICT`, and an integration test double-runs ingestion over a job that has an `applications` row and asserts that row is byte-identical afterwards.
 
 ## 4. Interfaces
 
@@ -188,6 +190,22 @@ and import only `schemas/canonical` + `core/`. No DB, no relevance, no dedup, no
 | `sources.greenhouse.GreenhouseSource` | `slug="greenhouse"` | `boards-api.greenhouse.io/v1/boards/{token}` (+ `/jobs?content=true`). Entity-decodes `content`, derives `remote`/`department` best-effort. |
 | `sources.lever.LeverSource` | `slug="lever"` | `api.lever.co/v0/postings/{account}?mode=json`. Uses `descriptionPlain`/`additionalPlain` directly; `workplaceType` → `remote`. |
 
+### `ingestion/` (day 6)
+
+`app/ingestion/` is the orchestration core and never imports a session (ADR-0011); the
+repository-backed port implementations are in `app/services/ingestion.py`.
+
+| Symbol | Signature | Notes |
+|---|---|---|
+| `ingestion.pipeline.prepare` | `(RawPosting, JobSource, Ruleset) -> PreparedPosting` | `parse → derive identity → evaluate relevance → content_hash`. Raises `PipelineError(stage, ...)` on any stage that can't complete. Pure. |
+| `ingestion.pipeline.PreparedPosting` | frozen dataclass | `posting`, `identity`, `verdict`, `content_hash`. |
+| `ingestion.runner.IngestionRunner` | `dataclass(source, ruleset, posting_sink, filtered_sink, run_store, trigger="scheduled", fetch_retry_attempts=3, fetch_retry_backoff=1.0)` | `await run(SourceQuery) -> IngestionRunResult`. Skips (no run row) if the advisory lock is held; retries `fetch()` on `SourceUnavailable`; routes each posting to a sink; isolates a per-posting failure into `ingestion_errors` and finishes `partial`. |
+| `ingestion.results.IngestionRunResult` | dataclass | Per-run tally (`fetched/matched/filtered_out/inserted/updated/unchanged/failed`) + `status` + `errors[]`. `as_stats()` is the `ingestion_runs.stats` JSONB blob. |
+| `ingestion.ports.SourcePostingSink` | `Protocol.persist(*, identity, posting, raw_payload, content_hash, run_id) -> PersistOutcome` | May write `companies`/`jobs`/`source_postings`. |
+| `ingestion.ports.FilteredPostingSink` | `Protocol.record(*, identity, posting, verdict, raw_payload) -> None` | Writes `filtered_postings` only. |
+| `ingestion.ports.RunStore` | `Protocol`: `source_lock(slug) -> ContextManager[bool]`, `start(...)`, `record_error(...)`, `finish(...)` | Owns `ingestion_runs` / `ingestion_errors` + the `pg_try_advisory_xact_lock` per source. |
+| `services.ingestion.Repository{SourcePostingSink,FilteredPostingSink,RunStore}` | `(Session, *, source_id)` / `(Session)` | The ORM implementations. Per-posting `SAVEPOINT` for isolation; `content_hash` gate decides whether the `jobs` row is rewritten. |
+
 ## 5. Schema & ERD
 
 The schema, ERD, and load-bearing constraints are in **[`docs/data-model.md`](data-model.md)**
@@ -199,12 +217,14 @@ ADR-0002 (idempotency anchor), ADR-0003 (canonical vs. source-posting split), AD
 
 ## 6. Ingestion, relevance & idempotency
 
-Pipeline: `fetch → normalize → identify → relevance filter → idempotent persist → run log`.
+Pipeline: `fetch → parse → identify → relevance filter → idempotent persist → run log`.
+`IngestionRunner.run()` (day 6) drives it; per-posting steps are `ingestion/pipeline.prepare()`;
+persistence crosses the port seam into `services/ingestion.py`. See §4 for the interfaces.
 
 - **Idempotency anchor (ADR-0002):** `source_postings.dedup_key = coalesce(source_job_id, canonical_url)`, `NOT NULL`, `UNIQUE (source_id, dedup_key)`, plus a partial unique index on `(source_id, source_job_id) WHERE source_job_id IS NOT NULL`. `INSERT … ON CONFLICT … DO UPDATE` classifies inserted / updated / unchanged via `xmax = 0` + `content_hash` comparison.
 - **Relevance filter (ADR-0009):** a core pipeline stage, not an AI-layer add-on. Deterministic `evaluate(posting, ruleset)` combining title function-match + title-only seniority tokens + parsed minimum experience — never a body substring scan. Rejects go to `filtered_postings` (its own `(source_id, dedup_key)` uniqueness, no FK into `jobs`) and never reach the `jobs` table. Bias: keep on ambiguity, marked `weak`.
-- **Write-ownership invariant (ADR-0011):** ingestion may insert/update `companies`, `jobs`, `source_postings`, `filtered_postings`, `ingestion_*` — and must never create, update, or delete an `applications` row. Enforced by repository separation, typed patch objects, FK `ON DELETE RESTRICT`, zero database triggers, and integration tests.
-- **Reliability:** per-source `pg_advisory_lock` (no overlapping runs), `tenacity` retry with exponential backoff + jitter honoring `Retry-After`, per-source token-bucket rate limiting, per-posting failure isolation (`ingestion_errors`, run continues as `partial`).
+- **Write-ownership invariant (ADR-0011):** ingestion may insert/update `companies`, `jobs`, `source_postings`, `filtered_postings`, `ingestion_*` — and must never create, update, or delete an `applications` row. `app/ingestion/` cannot even import `app/db` (import-linter); it writes through ports whose only ORM implementations (`services/ingestion.py`) touch canonical tables. Also enforced by FK `ON DELETE RESTRICT`, zero database triggers, and an integration test that double-runs ingestion over a job with an `applications` row and asserts the row is unchanged.
+- **Reliability:** per-source `pg_try_advisory_xact_lock` (a run that doesn't get it finishes `skipped`, no run row), `tenacity` retry around `fetch()` on `SourceUnavailable` (the `HttpClient` also retries individual requests and honours a small `Retry-After`), per-source token-bucket rate limiting inside the adapter, per-posting failure isolation via a `SAVEPOINT` per posting → `ingestion_errors` row, run finishes `partial`.
 
 ## 7. API design
 
