@@ -131,6 +131,23 @@ Defined in full once `schemas/canonical.py`, `sources/base.py`, `deduplication/i
 are fixed by the design and summarized here as they're implemented; see the ADRs for the
 reasoning behind each one (ADR-0002 idempotency, ADR-0009 relevance, ADR-0011 write-ownership).
 
+### `core/` (day 2)
+
+| Symbol | Signature | Notes |
+|---|---|---|
+| `config.Settings` | `BaseSettings` | Env-var-backed, prefix `TORTOISEANDHIRE_` (except `DATABASE_URL`, unprefixed for PaaS compatibility). |
+| `config.get_settings()` | `() -> Settings` | `lru_cache`d; the one place config enters the app. App code never reads `os.environ`. |
+| `logging.configure_logging(settings)` | `(Settings) -> None` | Called once in `create_app()`. structlog: console renderer in dev, one JSON object per line in prod. |
+| `logging.get_logger(*names)` | `(*str) -> BoundLogger` | Emit key/value events: `log.info("ingestion.run.finished", inserted=17)`. |
+| `retry.retry_policy(...)` / `async_retry_policy(...)` | `(...) -> tenacity.Retrying` / `AsyncRetrying` | Callable: `retry_policy(retry_on=X)(fn, *args)`. Exponential backoff + jitter, capped, `reraise=True`. `Retry-After` handling is layered on in `sources/http.py`. |
+| `rate_limit.TokenBucket` | `dataclass(rate, capacity, clock=time.monotonic)` | `consume(n) -> bool`, `time_until(n) -> float`, `async acquire(n)`. One bucket per source. `clock` injectable for tests. |
+| `observability.metrics` | `Metrics` singleton | `inc(name, **labels)`, `observe(name, value)`, `render_prometheus() -> str`. In-memory; not a metrics backend. |
+| `observability.TimingMiddleware` | raw ASGI middleware | One request counter + one duration observation + a structured log line per request. Wired in `create_app()`. |
+| `errors.TortoiseError` | `Exception` | Root of the first-party exception hierarchy. |
+
+Entrypoint: `app.main.create_app(settings=None) -> FastAPI`; `app.main:app` is the uvicorn target.
+Routes so far: `GET /api/v1/health` (liveness only; readiness with a DB ping is added day 3).
+
 ## 5. Schema & ERD
 
 Written alongside the DB layer (day 3) as `docs/data-model.md`, with the full ERD and the
@@ -173,9 +190,11 @@ via `DATABASE_URL`. Detailed in `docs/runbook.md` once deployment is set up (day
 
 Target pipeline: lint → test → build → deploy, each job added to `.github/workflows/ci.yml` the
 day the code it exercises exists (see ADR-0001's build plan) rather than stubbed ahead of time.
-Coverage gates: ≥ 80% on `app/`, ≥ 95% on `deduplication/`, `discovery/`, and `ingestion/` (the
-correctness-critical core). See §10 of the design blueprint (linked from ADR-0001) for the full
-testing-boundaries table.
+Present: **`lint`** (day 1 — ruff, ruff-format, mypy `--strict`, import-linter, advisory pip-audit)
+and **`test`** (day 2 — `pytest`; no Postgres service yet, added day 3 when integration tests need
+it). Coverage gates: ≥ 80% on `app/`, ≥ 95% on `deduplication/`, `discovery/`, and `ingestion/`
+(the correctness-critical core). See §10 of the design blueprint (linked from ADR-0001) for the
+full testing-boundaries table.
 
 **`pip-audit` is visible, not blocking** (`continue-on-error: true` in the `lint` job). It scans
 against a CVE database that changes independently of this repo's commits — a hard-fail gate on it

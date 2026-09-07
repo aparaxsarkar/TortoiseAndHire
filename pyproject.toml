@@ -50,6 +50,9 @@ src = ["app", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
 # ---------------------------------------------------------------------------
 # mypy — strict on app/, relaxed on tests/
 # ---------------------------------------------------------------------------
@@ -126,6 +129,7 @@ forbidden_modules = ["app.db.repositories", "app.sources", "app.ingestion", "app
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
 markers = [
   "live: hits a real external API; excluded from default CI (see nightly-live.yml)",
 ]

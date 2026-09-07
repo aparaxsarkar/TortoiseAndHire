@@ -37,8 +37,8 @@ day's ADR if a new locked decision landed.
 | Day | Focus | ADR |
 |---|---|---|
 | 1 | Repo harness: `pyproject.toml`, `docker-compose.yml`, `Dockerfile`, `.env.example`, `Makefile`, pre-commit, empty `app/` packages, `ci.yml` (lint), import-linter contracts | **0001** (this file), **0012** |
-| 2 | `core/`: config, logging, retry, rate-limit, observability; `main.py` + `/health` | 0002 (idempotency strategy, recorded early since it shapes `core/retry`) |
-| 3 | DB layer: `db/base`, `session`, all `models/`, first Alembic migration | 0003 (canonical vs source-posting split), 0011 (write-ownership: FK `RESTRICT`, no triggers) |
+| 2 | `core/`: config, logging, retry, rate-limit, observability; `main.py` + `/health`; CI `test` job | — (`core/retry` is generic infra; the idempotency decision has no code here yet) |
+| 3 | DB layer: `db/base`, `session`, all `models/`, first Alembic migration | 0002 (source-level idempotency: the `UNIQUE (source_id, dedup_key)` anchor), 0003 (canonical vs source-posting split), 0011 (write-ownership: FK `RESTRICT`, no triggers) |
 | 4 | Repos + `deduplication/` + `discovery/` | 0009 (relevance filter before persistence) |
 | 5 | `sources/` scaffolding + Greenhouse + Lever adapters | 0004 (adapter boundary, no DB) |
 | 6 | `ingestion/`: runner, pipeline, results | 0004, 0009, 0011 (wired) |

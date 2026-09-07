@@ -10,8 +10,8 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
@@ -28,7 +28,17 @@ jobs:
       - run: pip install pip-audit && pip-audit --strict --skip-editable
         continue-on-error: true
 
-# test / build / migrations-check jobs are added as the code they exercise
-# lands (see docs/architecture.md §10 for the target pipeline; the daily
-# build plan in ADR-0001 grows this file day by day rather than stubbing
-# steps that have nothing to run against yet).
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest
+
+# build / migrations-check jobs (and a Postgres service for the test job) are
+# added as the code they exercise lands - see docs/architecture.md §10 and the
+# build plan in ADR-0001.
