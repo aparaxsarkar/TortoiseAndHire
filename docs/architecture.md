@@ -150,9 +150,12 @@ Routes so far: `GET /api/v1/health` (liveness only; readiness with a DB ping is 
 
 ## 5. Schema & ERD
 
-Written alongside the DB layer (day 3) as `docs/data-model.md`, with the full ERD and the
-`UNIQUE (source_id, dedup_key)` idempotency-anchor rationale (ADR-0002). Placeholder removed
-once that file exists — do not duplicate the schema in two places.
+The schema, ERD, and load-bearing constraints are in **[`docs/data-model.md`](data-model.md)**
+(day 3). ORM models live in `app/models/`; `app/db/base.py` holds the `Base` + constraint
+naming convention; `app/db/session.py` owns the engine and `session_scope()`. Migrations are
+in `migrations/`, one initial revision so far (`0001`). Rationale for the key decisions:
+ADR-0002 (idempotency anchor), ADR-0003 (canonical vs. source-posting split), ADR-0011
+(write-ownership: FK `RESTRICT`, no triggers).
 
 ## 6. Ingestion, relevance & idempotency
 
@@ -190,11 +193,13 @@ via `DATABASE_URL`. Detailed in `docs/runbook.md` once deployment is set up (day
 
 Target pipeline: lint → test → build → deploy, each job added to `.github/workflows/ci.yml` the
 day the code it exercises exists (see ADR-0001's build plan) rather than stubbed ahead of time.
-Present: **`lint`** (day 1 — ruff, ruff-format, mypy `--strict`, import-linter, advisory pip-audit)
-and **`test`** (day 2 — `pytest`; no Postgres service yet, added day 3 when integration tests need
-it). Coverage gates: ≥ 80% on `app/`, ≥ 95% on `deduplication/`, `discovery/`, and `ingestion/`
-(the correctness-critical core). See §10 of the design blueprint (linked from ADR-0001) for the
-full testing-boundaries table.
+Present: **`lint`** (day 1 — ruff, ruff-format, mypy `--strict`, import-linter, advisory
+pip-audit) and **`test`** (day 2 — `pytest`; day 3 adds a `postgres:16` service, an
+`alembic upgrade head` / `downgrade base` round-trip, and `alembic check` so the models can
+never drift from the migration). Integration tests under `tests/integration/` skip themselves
+when `DATABASE_URL` is not a reachable `postgresql://` URL. Coverage gates: ≥ 80% on `app/`,
+≥ 95% on `deduplication/`, `discovery/`, and `ingestion/` (the correctness-critical core). See
+§10 of the design blueprint (linked from ADR-0001) for the full testing-boundaries table.
 
 **`pip-audit` is visible, not blocking** (`continue-on-error: true` in the `lint` job). It scans
 against a CVE database that changes independently of this repo's commits — a hard-fail gate on it

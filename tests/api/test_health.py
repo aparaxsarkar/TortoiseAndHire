@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.observability import metrics
@@ -19,3 +20,17 @@ def test_request_is_recorded_by_timing_middleware() -> None:
     out = metrics.render_prometheus()
     assert 'http_requests_total{method="GET",status="200"} 1.0' in out
     assert "http_request_duration_seconds_count 1" in out
+
+
+def test_ready_returns_200_when_database_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.health.check_database", lambda: True)
+    resp = TestClient(create_app()).get("/api/v1/health/ready")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "database": "ok"}
+
+
+def test_ready_returns_503_when_database_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.services.health.check_database", lambda: False)
+    resp = TestClient(create_app()).get("/api/v1/health/ready")
+    assert resp.status_code == 503
+    assert resp.json() == {"status": "degraded", "database": "error"}

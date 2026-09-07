@@ -49,6 +49,10 @@ src = ["app", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+# UP042: prefers enum.StrEnum over (str, Enum). We use `.value` explicitly
+# everywhere it matters, so the two are equivalent here, and (str, Enum) reads
+# fine - not worth churning.
+ignore = ["UP042"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app", "tests"]
@@ -118,10 +122,13 @@ source_modules = ["app.models", "app.db.repositories"]
 forbidden_modules = ["app.services", "app.api", "app.sources", "app.ingestion"]
 
 [[tool.importlinter.contracts]]
-name = "api/ never imports repositories, sources, or ingestion internals directly"
+name = "api/ never imports the db, sources, or ingestion internals directly"
 type = "forbidden"
 source_modules = ["app.api"]
-forbidden_modules = ["app.db.repositories", "app.sources", "app.ingestion", "app.deduplication", "app.discovery"]
+forbidden_modules = ["app.db", "app.sources", "app.ingestion", "app.deduplication", "app.discovery"]
+# A route may reach these *through a service* (api -> services -> db is the
+# sanctioned path); what's banned is a route importing them itself.
+allow_indirect_imports = "true"
 
 # ---------------------------------------------------------------------------
 # pytest
@@ -132,6 +139,11 @@ addopts = "-ra --strict-markers"
 asyncio_mode = "auto"
 markers = [
   "live: hits a real external API; excluded from default CI (see nightly-live.yml)",
+]
+filterwarnings = [
+  # Starlette's TestClient/httpx and anyio emit these; nothing we can act on yet.
+  "ignore:Using `httpx` with `starlette.testclient`",
+  "ignore:The anyio.abc.BlockingPortal alias is deprecated",
 ]
 
 [tool.coverage.run]

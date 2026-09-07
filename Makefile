@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck imports test test-cov up down run clean
+.PHONY: install lint format typecheck imports test test-cov up down run migrate revision clean
 
 install:
 	pip install -e ".[dev]"
@@ -29,6 +29,12 @@ down:
 
 run:
 	uvicorn app.main:app --reload
+
+migrate:
+	alembic upgrade head
+
+revision:
+	alembic revision --autogenerate -m "$(m)"
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +

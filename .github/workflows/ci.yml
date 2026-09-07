@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # The test job's Postgres service. Integration tests skip themselves when
+  # DATABASE_URL is not a reachable postgres:// URL (e.g. local runs).
+  DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/tortoiseandhire_test
+
 jobs:
   lint:
     name: lint
@@ -31,14 +36,33 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tortoiseandhire_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - name: Apply migrations
+        run: alembic upgrade head
+      - name: Migration round-trips (down to base and back)
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+      - name: Models match the migration (autogenerate is empty)
+        run: alembic check
       - run: pytest
 
-# build / migrations-check jobs (and a Postgres service for the test job) are
-# added as the code they exercise lands - see docs/architecture.md §10 and the
-# build plan in ADR-0001.
+# build / migrations-check jobs are added as the code they exercise lands -
+# see docs/architecture.md §10 and the build plan in ADR-0001.

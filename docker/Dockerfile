@@ -11,9 +11,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libpq5 curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+COPY pyproject.toml alembic.ini ./
 COPY app ./app
-# migrations/ and alembic.ini are added here once the DB layer lands (ADR-0003).
+COPY migrations ./migrations
 
 RUN pip install --no-cache-dir .
 
