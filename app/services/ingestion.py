@@ -1,12 +1,15 @@
-"""Repository-backed implementations of the ingestion ports.
+"""Ingestion in the services layer: the ORM-backed ports, plus the service that
+composes them into a run.
 
-This is the ORM half of the persistence seam: `app/ingestion/` defines the ports
-and never imports a session, these classes bind them to real repositories.
+`RepositorySourcePostingSink` / `RepositoryFilteredPostingSink` / `RepositoryRunStore`
+are the ORM half of the persistence seam - `app/ingestion/` defines the ports and
+never imports a session, these bind them to real repositories. Per-posting
+isolation is a SAVEPOINT (`session.begin_nested()`); the per-source advisory lock
+is `pg_try_advisory_xact_lock`, released when the surrounding transaction ends.
 
-Per-posting isolation is a SAVEPOINT (`session.begin_nested()`) around each
-posting's writes, so one bad row rolls back to just before itself and the run
-carries on. The per-source advisory lock is `pg_try_advisory_xact_lock`, which
-releases automatically when the surrounding transaction ends.
+`IngestionService` is the entry point the API, the CLI, and the scheduled job all
+call: resolve the adapter, open one transaction, wire the sinks, run, map the
+result to a DTO.
 """
 
 from __future__ import annotations
@@ -14,30 +17,42 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import uuid
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
+from app.core.errors import TortoiseError
 from app.core.logging import get_logger
 from app.db.repositories import (
     CompanyRepository,
     FilteredPostingRepository,
     JobRepository,
     SourcePostingRepository,
+    SourceRepository,
     UpsertOutcome,
 )
+from app.db.session import session_scope
 from app.deduplication.identity import PostingIdentity
 from app.discovery.rules import RelevanceVerdict
+from app.discovery.ruleset import Ruleset, load_ruleset
 from app.ingestion.ports import PersistOutcome
-from app.ingestion.results import PostingError, RunStatusName
+from app.ingestion.results import IngestionRunResult, PostingError, RunStatusName
+from app.ingestion.runner import IngestionRunner
 from app.models import IngestionError, IngestionRun, Job, Source
-from app.models.enums import RunStatus
+from app.models.enums import RunStatus, RunTrigger
 from app.schemas.canonical import CanonicalPosting
+from app.schemas.ingestion import IngestionReport, SourceRunResult
+from app.sources.base import JobSource, SourceQuery
+from app.sources.registry import get_source
 
 log = get_logger("services.ingestion")
+
+SessionFactory = Callable[[], AbstractContextManager[Session]]
+SourceFactory = Callable[[str], JobSource]
 
 _OUTCOME_MAP = {
     UpsertOutcome.INSERTED: PersistOutcome.INSERTED,
@@ -216,3 +231,90 @@ class RepositoryRunStore:
         run.error_summary = error_summary
         run.finished_at = dt.datetime.now(dt.UTC)
         self.session.flush()
+
+
+class IngestionSetupError(TortoiseError):
+    """The run can't start: the source isn't seeded, or config is missing."""
+
+
+def _to_dto(result: IngestionRunResult) -> SourceRunResult:
+    return SourceRunResult(
+        source=result.source_slug,
+        status=result.status,
+        run_id=result.run_id,
+        error_summary=result.error_summary,
+        **result.as_stats(),
+    )
+
+
+class IngestionService:
+    """Composes a run: adapter + ruleset + one transaction + the repository sinks.
+
+    One call == one source == one transaction. `session_scope()` commits a
+    finished run (including a `partial` one) and rolls back only if the runner
+    itself raises. The advisory lock lives and dies with that transaction.
+    """
+
+    def __init__(
+        self,
+        *,
+        settings: Settings | None = None,
+        session_factory: SessionFactory = session_scope,
+        source_factory: SourceFactory = get_source,
+        ruleset: Ruleset | None = None,
+    ) -> None:
+        self._settings = settings or get_settings()
+        self._session_factory = session_factory
+        self._source_factory = source_factory
+        self._ruleset = ruleset or load_ruleset(self._settings.discovery_ruleset_path)
+
+    async def run_source(
+        self,
+        slug: str,
+        *,
+        targets: Sequence[str],
+        trigger: str = RunTrigger.SCHEDULED.value,
+    ) -> SourceRunResult:
+        source = self._source_factory(slug)  # raises SourceError for an unknown slug
+        try:
+            with self._session_factory() as session:
+                source_row = SourceRepository(session).get_by_slug(slug)
+                if source_row is None:
+                    raise IngestionSetupError(
+                        f"source {slug!r} has no row in `sources` - run scripts/seed_sources.py"
+                    )
+                runner = IngestionRunner(
+                    source=source,
+                    ruleset=self._ruleset,
+                    posting_sink=RepositorySourcePostingSink(session, source_id=source_row.id),
+                    filtered_sink=RepositoryFilteredPostingSink(session, source_id=source_row.id),
+                    run_store=RepositoryRunStore(session),
+                    trigger=trigger,
+                )
+                result = await runner.run(SourceQuery(targets=list(targets)))
+            return _to_dto(result)
+        finally:
+            await source.aclose()
+
+    async def run_all(
+        self,
+        *,
+        plan: Mapping[str, Sequence[str]],
+        trigger: str = RunTrigger.SCHEDULED.value,
+    ) -> IngestionReport:
+        """Run every source in `plan` ({slug: targets}). One source failing
+        outright doesn't stop the others - it becomes a `failed` result."""
+        results: list[SourceRunResult] = []
+        for slug, targets in plan.items():
+            try:
+                results.append(await self.run_source(slug, targets=targets, trigger=trigger))
+            except Exception as exc:
+                log.exception("ingestion.service.source_failed", source=slug)
+                results.append(
+                    SourceRunResult(
+                        source=slug,
+                        status="failed",
+                        error_summary=f"{type(exc).__name__}: {exc}",
+                    )
+                )
+        return IngestionReport(results=results)

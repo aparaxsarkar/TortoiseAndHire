@@ -42,7 +42,7 @@ day's ADR if a new locked decision landed.
 | 4 ✓ | `schemas/canonical`; `deduplication/` (url_canonical, identity, content_hash); `discovery/` (ruleset, experience, rules) + `config/discovery.yml`; repositories (companies get_or_create, source_postings/filtered_postings upsert, sources, jobs); CI coverage gate ≥95% on the pure core | **0009** (relevance filter before persistence) |
 | 5 ✓ | `sources/`: `JobSource` protocol + `BaseSource`, shared async `http` client, `SourceError` taxonomy, HTML→text, `registry`; Greenhouse + Lever adapters; `respx`-mocked unit tests + opt-in `@live` smoke tests | **0004** (adapter boundary: fetch/parse only, no DB) |
 | 6 ✓ | `ingestion/`: `pipeline.prepare`, `IngestionRunner`, `results`, and the three ORM-free ports; `services/ingestion.py` binds them to repositories (SAVEPOINT isolation, `pg_try_advisory_xact_lock`); new import-linter contract *"ingestion/ is ORM-free"*; coverage gate extended to `app/ingestion/*` | 0004, 0009, 0011 (wired) |
-| 7 | `services/`: `IngestionService`, `JobService.search` | — |
+| 7 ✓ | `services/`: `IngestionService` (`run_source` / `run_all` — resolve adapter, own the transaction, map to DTOs); `JobService.search` / `.get`; `schemas/jobs` + `schemas/ingestion` DTOs; `JobRepository.search` (filters + pagination, no N+1); `aclose()` added to the `JobSource` protocol | — (wires 0004/0009/0011) |
 | 8 | API I: `routes/jobs`, `routes/ingestion`, auth, redaction | 0008 (server-side-only auth) |
 | 9 | API II + Excel round-trip: `ApplicationService`, `exports/`, import | 0005 (revised: Excel round-trips user-owned fields), 0010 (revision guard / dry-run) |
 | 10 | Deploy: Neon, Render, Actions cron, runbook | 0006 (deployment) |

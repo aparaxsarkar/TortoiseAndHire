@@ -53,6 +53,11 @@ class JobSource(Protocol):
 
     def parse(self, raw: RawPosting) -> CanonicalPosting: ...
 
+    async def aclose(self) -> None:
+        """Release the underlying HTTP client. The caller that constructed the
+        adapter owns its lifecycle (e.g. `IngestionService`)."""
+        ...
+
 
 class BaseSource:
     """Shared lifecycle for HTTP-backed adapters. Subclasses set `slug`,

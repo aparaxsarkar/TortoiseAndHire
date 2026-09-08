@@ -62,9 +62,13 @@ TortoiseAndHire/
 │   ├── models/                  SQLAlchemy ORM — persistence shape only
 │   ├── schemas/
 │   │   ├── canonical.py         RawPosting, CanonicalPosting — the adapter contract
-│   │   └── ...                  jobs · applications · ingestion · exports (API DTOs)
-│   ├── services/                jobs · applications · ingestion · discovery · exports · imports — business logic
-│   │   └── ingestion.py         Repository{SourcePostingSink,FilteredPostingSink,RunStore} — the ORM half of the seam
+│   │   ├── jobs.py              JobFilters (search input) · JobSummary · JobSearchResult
+│   │   ├── ingestion.py         SourceRunResult · IngestionReport (run DTOs)
+│   │   └── ...                  applications · exports (API DTOs — later)
+│   ├── services/                business logic; owns transactions; returns DTOs, never ORM rows
+│   │   ├── ingestion.py         Repository{SourcePostingSink,FilteredPostingSink,RunStore} (ORM half of the seam) + IngestionService (run_source · run_all)
+│   │   ├── jobs.py              JobService.search / .get — read-side, maps rows → JobSummary
+│   │   └── health.py            readiness probe
 │   ├── sources/
 │   │   ├── base.py              JobSource Protocol, SourceQuery, BaseSource lifecycle
 │   │   ├── errors.py            SourceError taxonomy (Unavailable · RateLimited · Auth · Payload)
@@ -180,7 +184,7 @@ and import only `schemas/canonical` + `core/`. No DB, no relevance, no dedup, no
 
 | Symbol | Signature | Notes |
 |---|---|---|
-| `sources.base.JobSource` | `Protocol` | `slug: ClassVar[str]`; `fetch(SourceQuery) -> AsyncIterator[RawPosting]`; `parse(RawPosting) -> CanonicalPosting`. `runtime_checkable`. |
+| `sources.base.JobSource` | `Protocol` | `slug: ClassVar[str]`; `fetch(SourceQuery) -> AsyncIterator[RawPosting]`; `parse(RawPosting) -> CanonicalPosting`; `async aclose()` (the caller that built the adapter owns its lifecycle — day 7). `runtime_checkable`. |
 | `sources.base.SourceQuery` | pydantic model | `targets: list[str]` — Greenhouse board tokens / Lever account slugs. |
 | `sources.base.BaseSource` | class | Shared HTTP lifecycle: `__init__(http=None)`, `_make_http()` (override for per-source rate limit / base URL), `aclose()`, async context manager. |
 | `sources.http.HttpClient` | `(*, base_url, rate_limit=None, timeout=20, user_agent=UA, retry_attempts=4, retry_backoff=0.5)` | One `httpx.AsyncClient`; honest UA; per-source `TokenBucket`; `tenacity` retry on `SourceUnavailable`; `Retry-After` ≤ 30 s honoured once. `get_json(url, *, params=None) -> Any`. |
@@ -205,6 +209,20 @@ repository-backed port implementations are in `app/services/ingestion.py`.
 | `ingestion.ports.FilteredPostingSink` | `Protocol.record(*, identity, posting, verdict, raw_payload) -> None` | Writes `filtered_postings` only. |
 | `ingestion.ports.RunStore` | `Protocol`: `source_lock(slug) -> ContextManager[bool]`, `start(...)`, `record_error(...)`, `finish(...)` | Owns `ingestion_runs` / `ingestion_errors` + the `pg_try_advisory_xact_lock` per source. |
 | `services.ingestion.Repository{SourcePostingSink,FilteredPostingSink,RunStore}` | `(Session, *, source_id)` / `(Session)` | The ORM implementations. Per-posting `SAVEPOINT` for isolation; `content_hash` gate decides whether the `jobs` row is rewritten. |
+
+### `services/` (day 7)
+
+The entry points the API, CLI, and scheduled job all call. They own the transaction and
+return schema DTOs — an ORM object never leaves this layer.
+
+| Symbol | Signature | Notes |
+|---|---|---|
+| `services.ingestion.IngestionService` | `(*, settings=None, session_factory=session_scope, source_factory=get_source, ruleset=None)` | Composes one run. `session_factory` / `source_factory` are injectable seams for tests. |
+| `IngestionService.run_source` | `async (slug, *, targets, trigger="scheduled") -> SourceRunResult` | Resolves the adapter, opens one transaction, wires the repository sinks, runs, maps to a DTO. `session_scope` commits a finished run (incl. `partial`); a runner crash rolls back. `aclose()`s the adapter in a `finally`. Raises `SourceError` (unknown slug) / `IngestionSetupError` (slug not in `sources`). |
+| `IngestionService.run_all` | `async (*, plan: Mapping[str, Sequence[str]], trigger=...) -> IngestionReport` | One `run_source` per entry; a source that fails outright becomes a `failed` result rather than aborting the batch. |
+| `services.jobs.JobService` | `(session)` | Read-side. |
+| `JobService.search` | `(JobFilters) -> JobSearchResult` | Filters: `q` (title), `company`, `source` slug, `remote`, `status`; `limit` (1–200) / `offset`. Order: `posted_at desc nulls last`, then `first_seen_at desc`. One count query + one page query + one batch query for source links (no N+1). |
+| `JobService.get` | `(uuid) -> JobSummary \| None` | Single job + its company name + source links. |
 
 ## 5. Schema & ERD
 

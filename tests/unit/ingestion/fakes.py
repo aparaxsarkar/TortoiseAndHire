@@ -49,6 +49,33 @@ def make_raw(
     )
 
 
+def sample_run_postings() -> list[RawPosting]:
+    """Two relevant postings + one that the ruleset rejects (senior title)."""
+    return [
+        make_raw(
+            id="1",
+            title="Software Engineer",
+            company_name="Acme",
+            source_url="https://x/1",
+            description_text="Build things. 0-2 yrs.",
+        ),
+        make_raw(
+            id="2",
+            title="Backend Developer",
+            company_name="Acme",
+            source_url="https://x/2",
+            description_text="APIs and pipelines.",
+        ),
+        make_raw(
+            id="3",
+            title="Senior Staff Engineer",
+            company_name="Acme",
+            source_url="https://x/3",
+            description_text="10+ years of experience.",
+        ),
+    ]
+
+
 def canon_from_raw(raw: RawPosting) -> CanonicalPosting:
     p = raw.payload
     return CanonicalPosting(
@@ -78,6 +105,7 @@ class FakeSource:
         self.fail_fetch_times = fail_fetch_times
         self.fetch_exc = fetch_exc
         self.fetch_calls = 0
+        self.closed = False
 
     async def fetch(self, query: Any) -> Any:
         self.fetch_calls += 1
@@ -94,6 +122,9 @@ class FakeSource:
         if hit is not None:
             return hit
         return canon_from_raw(raw)
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class FakeRunStore:
