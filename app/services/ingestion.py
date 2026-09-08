@@ -30,6 +30,7 @@ from app.core.logging import get_logger
 from app.db.repositories import (
     CompanyRepository,
     FilteredPostingRepository,
+    IngestionRunRepository,
     JobRepository,
     SourcePostingRepository,
     SourceRepository,
@@ -45,7 +46,7 @@ from app.ingestion.runner import IngestionRunner
 from app.models import IngestionError, IngestionRun, Job, Source
 from app.models.enums import RunStatus, RunTrigger
 from app.schemas.canonical import CanonicalPosting
-from app.schemas.ingestion import IngestionReport, SourceRunResult
+from app.schemas.ingestion import IngestionReport, IngestionRunSummary, SourceRunResult
 from app.sources.base import JobSource, SourceQuery
 from app.sources.registry import get_source
 
@@ -53,6 +54,10 @@ log = get_logger("services.ingestion")
 
 SessionFactory = Callable[[], AbstractContextManager[Session]]
 SourceFactory = Callable[[str], JobSource]
+
+#: trigger value for a run kicked off through the HTTP API (re-exported so
+#: `app/api/` doesn't have to import `app/models/`).
+TRIGGER_MANUAL_API = RunTrigger.MANUAL_API.value
 
 _OUTCOME_MAP = {
     UpsertOutcome.INSERTED: PersistOutcome.INSERTED,
@@ -236,6 +241,9 @@ class RepositoryRunStore:
 class IngestionSetupError(TortoiseError):
     """The run can't start: the source isn't seeded, or config is missing."""
 
+    http_status = 409
+    http_title = "Conflict"
+
 
 def _to_dto(result: IngestionRunResult) -> SourceRunResult:
     return SourceRunResult(
@@ -318,3 +326,26 @@ class IngestionService:
                     )
                 )
         return IngestionReport(results=results)
+
+    def recent_runs(self, *, limit: int = 20) -> list[IngestionRunSummary]:
+        with self._session_factory() as session:
+            rows = IngestionRunRepository(session).list_recent(limit=limit)
+            return [_run_summary(run, slug) for run, slug in rows]
+
+    def get_run(self, run_id: uuid.UUID) -> IngestionRunSummary | None:
+        with self._session_factory() as session:
+            found = IngestionRunRepository(session).get(run_id)
+            return _run_summary(found[0], found[1]) if found is not None else None
+
+
+def _run_summary(run: IngestionRun, source_slug: str) -> IngestionRunSummary:
+    return IngestionRunSummary(
+        id=run.id,
+        source=source_slug,
+        trigger=run.trigger,
+        status=run.status,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        stats={k: int(v) for k, v in run.stats.items()},
+        error_summary=run.error_summary,
+    )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,15 @@ from app.schemas.jobs import JobFilters
 from app.services.jobs import JobService
 
 _NOW = dt.datetime(2026, 9, 8, tzinfo=dt.UTC)
+
+
+@contextmanager
+def _use(session: Session) -> Iterator[Session]:
+    yield session
+
+
+def _svc(session: Session) -> JobService:
+    return JobService(session_factory=lambda: _use(session))
 
 
 def _seed(session: Session) -> dict[str, uuid.UUID]:
@@ -86,7 +97,7 @@ def _seed(session: Session) -> dict[str, uuid.UUID]:
 
 async def test_search_orders_by_posted_at_desc_nulls_last(db_session: Session) -> None:
     ids = _seed(db_session)
-    result = JobService(db_session).search(JobFilters())
+    result = _svc(db_session).search(JobFilters())
 
     assert result.total == 3
     assert [i.id for i in result.items] == [ids["ml"], ids["backend"], ids["closed"]]
@@ -94,19 +105,19 @@ async def test_search_orders_by_posted_at_desc_nulls_last(db_session: Session) -
 
 async def test_search_filters_by_title_substring(db_session: Session) -> None:
     _seed(db_session)
-    result = JobService(db_session).search(JobFilters(q="engineer"))
+    result = _svc(db_session).search(JobFilters(q="engineer"))
     assert {i.title for i in result.items} == {
         "Machine Learning Engineer",
         "Backend Engineer",
         "Data Engineer",
     }
-    result = JobService(db_session).search(JobFilters(q="machine learning"))
+    result = _svc(db_session).search(JobFilters(q="machine learning"))
     assert [i.title for i in result.items] == ["Machine Learning Engineer"]
 
 
 async def test_search_filters_by_remote_status_and_company(db_session: Session) -> None:
     _seed(db_session)
-    svc = JobService(db_session)
+    svc = _svc(db_session)
 
     assert {i.title for i in svc.search(JobFilters(remote=True)).items} == {
         "Machine Learning Engineer",
@@ -121,13 +132,13 @@ async def test_search_filters_by_remote_status_and_company(db_session: Session) 
 
 async def test_search_filters_by_source_slug(db_session: Session) -> None:
     ids = _seed(db_session)
-    result = JobService(db_session).search(JobFilters(source=ids["lever_slug"]))
+    result = _svc(db_session).search(JobFilters(source=ids["lever_slug"]))
     assert [i.id for i in result.items] == [ids["ml"]]
 
 
 async def test_search_paginates(db_session: Session) -> None:
     _seed(db_session)
-    page = JobService(db_session).search(JobFilters(limit=1, offset=1))
+    page = _svc(db_session).search(JobFilters(limit=1, offset=1))
     assert page.total == 3
     assert len(page.items) == 1
     assert page.items[0].title == "Backend Engineer"
@@ -135,7 +146,7 @@ async def test_search_paginates(db_session: Session) -> None:
 
 async def test_summary_carries_company_name_and_source_links(db_session: Session) -> None:
     _seed(db_session)
-    result = JobService(db_session).search(JobFilters(q="machine learning"))
+    result = _svc(db_session).search(JobFilters(q="machine learning"))
     ml = result.items[0]
 
     assert ml.company_name == "Acme Robotics"
@@ -146,7 +157,7 @@ async def test_summary_carries_company_name_and_source_links(db_session: Session
 
 async def test_get_returns_one_job_or_none(db_session: Session) -> None:
     ids = _seed(db_session)
-    svc = JobService(db_session)
+    svc = _svc(db_session)
 
     found = svc.get(ids["backend"])
     assert found is not None

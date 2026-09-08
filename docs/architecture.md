@@ -45,9 +45,9 @@ TortoiseAndHire/
 ├── app/
 │   ├── main.py                  FastAPI app factory, middleware, router registration
 │   ├── api/
-│   │   ├── deps.py              DI: get_session, auth, service providers
-│   │   ├── errors.py            exception handlers → RFC 7807 problem+json
-│   │   └── routes/              health · jobs · applications · ingestion · exports · discovery · sources
+│   │   ├── deps.py              require_token (bearer), service providers, job_filters query parsing
+│   │   ├── errors.py            ProblemException + handlers → RFC 7807 application/problem+json
+│   │   └── routes/              health · jobs (public) · ingestion (token) · [applications · exports · sources — later]
 │   ├── core/
 │   │   ├── config.py            Settings (pydantic-settings), env-only
 │   │   ├── logging.py           structlog: JSON in prod, key=value in dev
@@ -224,6 +224,20 @@ return schema DTOs — an ORM object never leaves this layer.
 | `JobService.search` | `(JobFilters) -> JobSearchResult` | Filters: `q` (title), `company`, `source` slug, `remote`, `status`; `limit` (1–200) / `offset`. Order: `posted_at desc nulls last`, then `first_seen_at desc`. One count query + one page query + one batch query for source links (no N+1). |
 | `JobService.get` | `(uuid) -> JobSummary \| None` | Single job + its company name + source links. |
 
+### `api/` (day 8)
+
+Routes parse a request, call a service, return a DTO. No DB / sources / ingestion imports
+(import-linter). See §7 for the endpoint table.
+
+| Symbol | Notes |
+|---|---|
+| `api.deps.require_token` | `HTTPBearer(auto_error=False)` + `secrets.compare_digest` vs `settings.api_token` → `ProblemException(401)`. Attached router-level on protected groups. |
+| `api.deps.get_job_service` / `get_ingestion_service` | Providers; overridden in tests to inject a rolled-back session / fake adapter. |
+| `api.deps.job_filters` | Query params → `JobFilters` (bounds enforced by `Query(ge=…, le=…)`). |
+| `api.errors.ProblemException` | `(status, title, detail?, type?)` — what a route raises for a deliberate 4xx. |
+| `api.errors.install_error_handlers(app)` | Handlers for `ProblemException`, `RequestValidationError` (422), `HTTPException`, `TortoiseError` (uses `exc.http_status`/`http_title`), and `Exception` (500, logged, no leak). |
+| `app.main.create_app` | Now mounts `health` + `jobs` + `ingestion` and installs the handlers. |
+
 ## 5. Schema & ERD
 
 The schema, ERD, and load-bearing constraints are in **[`docs/data-model.md`](data-model.md)**
@@ -246,11 +260,23 @@ persistence crosses the port seam into `services/ingestion.py`. See §4 for the 
 
 ## 7. API design
 
-REST under `/api/v1`. Auth (ADR-0008): a single bearer token, **server-side only** — never
-shipped to any client. Public reads are redacted (no `application`/`networking`/`notes` keys);
-every write, the personal application/networking endpoints, the ingestion trigger, the Excel
-import, and exports require the token. Errors are RFC 7807 `application/problem+json`. Full
-endpoint table lands in this section once `app/api/routes/` exists (days 8–9).
+REST under `/api/v1`. Auth (ADR-0008): a single static bearer token, **server-side only** —
+never shipped to any client. Errors are RFC 7807 `application/problem+json` (`app/api/errors.py`),
+including reshaped validation errors and a leak-free catch-all 500.
+
+| Method + path | Auth | Handler | Notes |
+|---|---|---|---|
+| `GET /health`, `GET /health/ready` | public | `services.health` | 503 if the DB is unreachable |
+| `GET /jobs` | public | `JobService.search` | query params → `JobFilters` (`q`, `company`, `source`, `remote`, `status`, `limit` 1–200, `offset`); redacted (`JobSummary` has no private fields) |
+| `GET /jobs/{id}` | public | `JobService.get` | 404 problem if missing; redacted |
+| `POST /ingestion/runs` | **token** | `IngestionService.run_source` / `run_all` | body `{source, targets}` **or** `{plan}` (exactly one); runs synchronously, returns `IngestionReport`; unknown slug → 400, unseeded slug → 409 |
+| `GET /ingestion/runs` | **token** | `IngestionService.recent_runs` | `limit` 1–100, newest first |
+| `GET /ingestion/runs/{id}` | **token** | `IngestionService.get_run` | 404 problem if missing |
+
+Later: `GET /sources`, `GET`+`PATCH /jobs/{id}/application`, `exports/*`, `metrics` (days 9–10).
+The bearer check is a router-level dependency on the protected groups, so it can't be
+forgotten on a new route. Redaction is structural — private data is a separate protected
+endpoint, not an authenticated view of a public one.
 
 ## 8. Excel export & import
 

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from app.api.routes import health
+from app.api.errors import install_error_handlers
+from app.api.routes import health, ingestion, jobs
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.observability import TimingMiddleware
@@ -24,7 +25,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="TortoiseAndHire", version="0.1.0")
     app.add_middleware(TimingMiddleware)
-    app.include_router(health.router, prefix=API_V1_PREFIX)
+    install_error_handlers(app)
+    for router in (health.router, jobs.router, ingestion.router):
+        app.include_router(router, prefix=API_V1_PREFIX)
 
     log.info("app.created", env=settings.env)
     return app
