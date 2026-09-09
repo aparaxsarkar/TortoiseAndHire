@@ -5,6 +5,9 @@ tool (never a browser impersonation), a per-source token bucket, retry on
 transient errors, and HTTP status mapped to the `SourceError` taxonomy. A `429`
 with a small `Retry-After` is honoured once here; anything larger is raised for
 the ingestion runner to decide on.
+
+`get_json` covers Greenhouse / Lever / Ashby; `post_json` (same machinery, POST
++ JSON body) covers Workday's hidden `wday/cxs` search endpoint.
 """
 
 from __future__ import annotations
@@ -44,7 +47,12 @@ class HttpClient:
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
-            headers={"User-Agent": user_agent, "Accept": "application/json"},
+            headers={
+                "User-Agent": user_agent,
+                "Accept": "application/json",
+                # Workday's list strings ("Posted Today") are localised; pin English.
+                "Accept-Language": "en-US",
+            },
             follow_redirects=True,
         )
         self._bucket = rate_limit
@@ -54,9 +62,11 @@ class HttpClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def _request(self, url: str, params: dict[str, Any] | None) -> httpx.Response:
+    async def _request(
+        self, method: str, url: str, params: dict[str, Any] | None, json_body: Any | None
+    ) -> httpx.Response:
         try:
-            resp = await self._client.get(url, params=params)
+            resp = await self._client.request(method, url, params=params, json=json_body)
         except httpx.TimeoutException as exc:
             raise SourceUnavailable(f"timeout: {url}") from exc
         except httpx.TransportError as exc:
@@ -75,7 +85,9 @@ class HttpClient:
             raise SourcePayloadError(f"{code} from {url}: {resp.text[:200]}")
         return resp
 
-    async def _get_with_retries(self, url: str, params: dict[str, Any] | None) -> httpx.Response:
+    async def _send_with_retries(
+        self, method: str, url: str, params: dict[str, Any] | None, json_body: Any | None
+    ) -> httpx.Response:
         retrying = async_retry_policy(
             retry_on=SourceUnavailable,
             max_attempts=self._retry_attempts,
@@ -85,7 +97,7 @@ class HttpClient:
         if self._bucket is not None:
             await self._bucket.acquire()
         try:
-            return await retrying(self._request, url, params)
+            return await retrying(self._request, method, url, params, json_body)
         except SourceRateLimited as exc:
             if exc.retry_after is None or exc.retry_after > _MAX_HONOURED_RETRY_AFTER:
                 raise
@@ -93,11 +105,19 @@ class HttpClient:
             await asyncio.sleep(exc.retry_after)
             if self._bucket is not None:
                 await self._bucket.acquire()
-            return await retrying(self._request, url, params)
+            return await retrying(self._request, method, url, params, json_body)
 
-    async def get_json(self, url: str, *, params: dict[str, Any] | None = None) -> Any:
-        resp = await self._get_with_retries(url, params)
+    @staticmethod
+    def _json(resp: httpx.Response, url: str) -> Any:
         try:
             return resp.json()
         except ValueError as exc:
             raise SourcePayloadError(f"invalid JSON from {url}") from exc
+
+    async def get_json(self, url: str, *, params: dict[str, Any] | None = None) -> Any:
+        return self._json(await self._send_with_retries("GET", url, params, None), url)
+
+    async def post_json(
+        self, url: str, *, json_body: Any, params: dict[str, Any] | None = None
+    ) -> Any:
+        return self._json(await self._send_with_retries("POST", url, params, json_body), url)

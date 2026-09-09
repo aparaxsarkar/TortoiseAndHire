@@ -74,3 +74,28 @@ was not.
 - The runner (Day 6) owns everything the adapter refuses to: retry accounting across
   a run, the advisory lock, the relevance gate, `ingestion_runs` / `ingestion_errors`,
   and per-posting failure isolation.
+
+## Addendum — 2026-09-11: Ashby + Workday adapters
+
+Added as first-party adapters. No change to the boundary — both are `JobSource`
+implementations that only fetch and parse. What the two of them needed that
+Greenhouse/Lever didn't, all contained in their own files:
+
+- **`HttpClient` gained `post_json`** — same retry / rate-limit / status→error path
+  as `get_json`, just POST + JSON body. Workday's list endpoint
+  (`wday/cxs/{tenant}/{site}/jobs`) is POST-only. `Accept-Language: en-US` was
+  added to the shared default headers (Workday localises its list strings).
+- **Ashby** (`api.ashbyhq.com/posting-api/job-board/{board}`) is as clean as Lever:
+  one GET, a UUID `id`, both HTML and plain descriptions, a structured address.
+  No company name in the response, so it's derived from the board token.
+- **Workday has no universal schema** — every tenant differs by shard
+  (`wd1`/`wd3`/`wd5`) and site (`External`, `jobs`, `NVIDIAExternalCareerSite`, …),
+  so a target is `tenant:shard:site`, configured in `config/sources.yml`. The list
+  call gives only title / path / localised strings; the description and a real
+  date come from a per-posting detail GET. A detail GET that fails is caught inside
+  `fetch()` and the posting is yielded list-only (identity then falls back to the
+  req id parsed from the path). A tenant is capped at 300 postings/run.
+- `CanonicalPosting` was **not** changed. Source-specific extras (`applyUrl`,
+  `workday_req_id`, `additional_locations`, …) live in `source_metadata`.
+- The `sources/ have no DB access and no business logic` contract still holds; the
+  new `@live` smoke tests (Ashby `posthog`, Workday `nvidia`) stay out of CI.

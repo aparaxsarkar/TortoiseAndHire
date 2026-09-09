@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 
 import httpx
@@ -30,6 +31,23 @@ async def http() -> AsyncIterator[HttpClient]:
 async def test_returns_parsed_json(http: HttpClient) -> None:
     respx.get(URL).mock(return_value=httpx.Response(200, json={"ok": 1}))
     assert await http.get_json(URL) == {"ok": 1}
+
+
+@respx.mock
+async def test_post_json_sends_the_body_and_parses_the_response(http: HttpClient) -> None:
+    route = respx.post(URL).mock(return_value=httpx.Response(200, json={"total": 3}))
+    assert await http.post_json(URL, json_body={"limit": 20, "offset": 0}) == {"total": 3}
+    assert route.calls.last.request.method == "POST"
+    assert json.loads(route.calls.last.request.content) == {"limit": 20, "offset": 0}
+    assert route.calls.last.request.headers["content-type"] == "application/json"
+
+
+@respx.mock
+async def test_post_json_maps_5xx_to_unavailable_and_retries(http: HttpClient) -> None:
+    route = respx.post(URL)
+    route.side_effect = [httpx.Response(503), httpx.Response(200, json={"ok": True})]
+    assert await http.post_json(URL, json_body={}) == {"ok": True}
+    assert route.call_count == 2
 
 
 @respx.mock

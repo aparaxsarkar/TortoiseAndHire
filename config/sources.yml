@@ -3,11 +3,15 @@
 #
 #   greenhouse: Greenhouse "board tokens"  -> boards.greenhouse.io/<token>
 #   lever:      Lever account slugs         -> jobs.lever.co/<account>
+#   ashby:      Ashby board names           -> jobs.ashbyhq.com/<board>
+#   workday:    "<tenant>:<shard>:<site>"   -> <tenant>.<shard>.myworkdayjobs.com/<site>
+#               (find all three in a company's careers URL; shard is wd1/wd3/wd5/...)
+#               A very large Workday tenant is capped at the first 300 postings.
 #
 # Used by `python -m scripts.run_ingestion` and the `ingest` GitHub Actions
 # workflow. Every key must be a slug from `app.sources.registry.available()`.
 
-version: "2026-09-10.a"
+version: "2026-09-10.b"
 
 sources:
   greenhouse:
@@ -15,3 +19,7 @@ sources:
     - anthropic
   lever:
     - leverdemo
+  ashby:
+    - posthog
+  workday:
+    - redhat:wd5:jobs

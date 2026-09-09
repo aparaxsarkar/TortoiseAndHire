@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.sources.ashby import AshbySource
 from app.sources.base import JobSource
 from app.sources.errors import SourceError
 from app.sources.greenhouse import GreenhouseSource
 from app.sources.lever import LeverSource
+from app.sources.workday import WorkdaySource
 
 _SOURCES: dict[str, Callable[[], JobSource]] = {
     GreenhouseSource.slug: GreenhouseSource,
     LeverSource.slug: LeverSource,
+    AshbySource.slug: AshbySource,
+    WorkdaySource.slug: WorkdaySource,
 }
 
 

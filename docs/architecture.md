@@ -78,7 +78,7 @@ TortoiseAndHire/
 │   │   ├── http.py              shared async httpx wrapper: UA, token bucket, retry, status→error
 │   │   ├── _html.py             minimal HTML → plain text (stdlib only)
 │   │   ├── registry.py          slug → adapter factory (available() · get_source())
-│   │   └── greenhouse.py · lever.py · [ashby.py · workday.py — later]
+│   │   └── greenhouse.py · lever.py · ashby.py · workday.py
 │   ├── ingestion/               ORM-free: persists only through the ports in ports.py
 │   │   ├── runner.py            IngestionRunner — advisory lock, retry-around-fetch, relevance gate, partial failure, run tally
 │   │   ├── pipeline.py          prepare(raw): parse → identity → relevance → content_hash; PipelineError tags the failing stage
@@ -189,14 +189,16 @@ and import only `schemas/canonical` + `core/`. No DB, no relevance, no dedup, no
 | Symbol | Signature | Notes |
 |---|---|---|
 | `sources.base.JobSource` | `Protocol` | `slug: ClassVar[str]`; `fetch(SourceQuery) -> AsyncIterator[RawPosting]`; `parse(RawPosting) -> CanonicalPosting`; `async aclose()` (the caller that built the adapter owns its lifecycle — day 7). `runtime_checkable`. |
-| `sources.base.SourceQuery` | pydantic model | `targets: list[str]` — Greenhouse board tokens / Lever account slugs. |
+| `sources.base.SourceQuery` | pydantic model | `targets: list[str]` — per-adapter identifiers: Greenhouse board tokens, Lever account slugs, Ashby board names, Workday `tenant:shard:site`. |
 | `sources.base.BaseSource` | class | Shared HTTP lifecycle: `__init__(http=None)`, `_make_http()` (override for per-source rate limit / base URL), `aclose()`, async context manager. |
-| `sources.http.HttpClient` | `(*, base_url, rate_limit=None, timeout=20, user_agent=UA, retry_attempts=4, retry_backoff=0.5)` | One `httpx.AsyncClient`; honest UA; per-source `TokenBucket`; `tenacity` retry on `SourceUnavailable`; `Retry-After` ≤ 30 s honoured once. `get_json(url, *, params=None) -> Any`. |
+| `sources.http.HttpClient` | `(*, base_url, rate_limit=None, timeout=20, user_agent=UA, retry_attempts=4, retry_backoff=0.5)` | One `httpx.AsyncClient`; honest UA + `Accept-Language: en-US`; per-source `TokenBucket`; `tenacity` retry on `SourceUnavailable`; `Retry-After` ≤ 30 s honoured once. `get_json(url, *, params=None)` and `post_json(url, *, json_body, params=None)` — both through the same retry / status-mapping path. |
 | `sources.errors.SourceError` | `TortoiseError` | Base. `SourceUnavailable` (5xx/timeout — retry), `SourceRateLimited(*, retry_after)` (429), `SourceAuthError` (401/403 — abort run), `SourcePayloadError` (unparseable — skip one). The runner maps each to a pipeline stage (day 6). |
-| `sources.registry.available` | `() -> list[str]` | Sorted registered slugs (`["greenhouse", "lever"]`). |
+| `sources.registry.available` | `() -> list[str]` | Sorted registered slugs (`["ashby", "greenhouse", "lever", "workday"]`). |
 | `sources.registry.get_source` | `(slug: str) -> JobSource` | Factory lookup; unknown slug → `SourceError`. The only path from slug to adapter. |
 | `sources.greenhouse.GreenhouseSource` | `slug="greenhouse"` | `boards-api.greenhouse.io/v1/boards/{token}` (+ `/jobs?content=true`). Entity-decodes `content`, derives `remote`/`department` best-effort. |
 | `sources.lever.LeverSource` | `slug="lever"` | `api.lever.co/v0/postings/{account}?mode=json`. Uses `descriptionPlain`/`additionalPlain` directly; `workplaceType` → `remote`. |
+| `sources.ashby.AshbySource` | `slug="ashby"` | `api.ashbyhq.com/posting-api/job-board/{board}` — one GET, `{apiVersion, jobs:[…]}`. UUID `id`, both description formats, structured `address` → city/region/country. No company name in the feed → derived from the board token. |
+| `sources.workday.WorkdaySource` | `slug="workday"` | Target `tenant:shard:site` (or a `wday/cxs` URL). `POST {base}/jobs` (paged, `limit ≤ 20`) for the list, then one `GET {base}{externalPath}` per posting for the description + real `startDate`. A failed detail GET is isolated (posting kept, list-only). Capped at 300 postings/target. |
 
 ### `ingestion/` (day 6)
 

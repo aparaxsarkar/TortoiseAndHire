@@ -7,21 +7,29 @@ from __future__ import annotations
 
 import pytest
 
-from app.sources.base import SourceQuery
+from app.schemas.canonical import RawPosting
+from app.sources.ashby import AshbySource
+from app.sources.base import JobSource, SourceQuery
 from app.sources.greenhouse import GreenhouseSource
 from app.sources.lever import LeverSource
+from app.sources.workday import WorkdaySource
 
 pytestmark = pytest.mark.live
 
 
-async def test_greenhouse_vercel_board_parses() -> None:
-    src = GreenhouseSource()
+async def _first(src: JobSource, target: str) -> RawPosting:
+    """First posting only - keeps the Workday smoke test to two HTTP calls."""
     try:
-        raws = [r async for r in src.fetch(SourceQuery(targets=["vercel"]))]
+        async for raw in src.fetch(SourceQuery(targets=[target])):
+            return raw
+        raise AssertionError(f"{src.slug}: {target!r} returned no postings")
     finally:
         await src.aclose()
-    assert raws
-    posting = src.parse(raws[0])
+
+
+async def test_greenhouse_vercel_board_parses() -> None:
+    src = GreenhouseSource()
+    posting = src.parse(await _first(src, "vercel"))
     assert posting.source_slug == "greenhouse"
     assert posting.title
     assert posting.url.startswith("http")
@@ -29,11 +37,24 @@ async def test_greenhouse_vercel_board_parses() -> None:
 
 async def test_lever_demo_account_parses() -> None:
     src = LeverSource()
-    try:
-        raws = [r async for r in src.fetch(SourceQuery(targets=["leverdemo"]))]
-    finally:
-        await src.aclose()
-    assert raws
-    posting = src.parse(raws[0])
+    posting = src.parse(await _first(src, "leverdemo"))
     assert posting.source_slug == "lever"
     assert posting.title
+
+
+async def test_ashby_posthog_board_parses() -> None:
+    src = AshbySource()
+    posting = src.parse(await _first(src, "posthog"))
+    assert posting.source_slug == "ashby"
+    assert posting.title
+    assert posting.source_job_id
+    assert posting.url.startswith("https://jobs.ashbyhq.com/")
+
+
+async def test_workday_nvidia_tenant_parses() -> None:
+    src = WorkdaySource()
+    posting = src.parse(await _first(src, "nvidia:wd5:NVIDIAExternalCareerSite"))
+    assert posting.source_slug == "workday"
+    assert posting.title
+    assert posting.source_job_id
+    assert "myworkdayjobs.com" in posting.url

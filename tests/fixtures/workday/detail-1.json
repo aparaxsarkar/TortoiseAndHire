@@ -1,0 +1,18 @@
+{
+  "jobPostingInfo": {
+    "id": "0a757e1f3ad3102c280a27e319640000",
+    "jobPostingId": "ML-Engineer_JR1001",
+    "jobReqId": "JR1001",
+    "title": "ML Engineer",
+    "jobDescription": "<p>Train models. <strong>3+ years</strong> of experience.</p>",
+    "location": "United States, Santa Clara",
+    "additionalLocations": ["United States, Remote"],
+    "startDate": "2026-09-09",
+    "postedOn": "Posted Today",
+    "timeType": "Full time",
+    "remoteType": null,
+    "country": { "descriptor": "United States", "id": "c4f78be1a8f14da0ab49ce1162348a5e" },
+    "externalUrl": "https://acme.wd5.myworkdayjobs.com/CareerSite/job/US-CA-Santa-Clara/ML-Engineer_JR1001"
+  },
+  "hiringOrganization": { "name": "US01 Acme Santa Clara", "url": "" }
+}

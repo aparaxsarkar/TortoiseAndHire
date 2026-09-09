@@ -5,8 +5,8 @@ TortoiseAndHire keeps discovering, filtering, and tracking jobs while you're
 away from the keyboard.*
 
 A personal job-search automation platform: discovers postings from ATS feeds
-(Greenhouse and Lever today; Ashby/Workday are the same `JobSource` contract),
-stores them in PostgreSQL with source-level idempotency, filters them to
+(Greenhouse, Lever, Ashby, and Workday), stores them in PostgreSQL with
+source-level idempotency, filters them to
 relevant roles before they're ever persisted, and tracks applications — with a
 strict, enforced boundary between job discovery (system-owned) and application
 tracking (user-owned).

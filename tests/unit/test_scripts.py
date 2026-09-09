@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from app.sources.registry import available
 from scripts.run_ingestion import load_plan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -11,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_load_plan_reads_the_checked_in_config() -> None:
     plan = load_plan(REPO_ROOT / "config" / "sources.yml")
-    assert set(plan) <= {"greenhouse", "lever"}
+    assert set(plan) <= set(available())
     assert plan  # not empty
     assert all(isinstance(targets, list) and targets for targets in plan.values())
 

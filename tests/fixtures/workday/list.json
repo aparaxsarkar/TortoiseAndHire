@@ -1,0 +1,34 @@
+{
+  "total": 4,
+  "jobPostings": [
+    {
+      "title": "ML Engineer",
+      "externalPath": "/job/US-CA-Santa-Clara/ML-Engineer_JR1001",
+      "locationsText": "United States, Santa Clara",
+      "postedOn": "Posted Today",
+      "bulletFields": ["JR1001"]
+    },
+    {
+      "title": "Staff Data Engineer",
+      "externalPath": "/job/Remote/Staff-Data-Engineer_JR1002",
+      "locationsText": "Remote - US",
+      "postedOn": "Posted 3 Days Ago",
+      "remoteType": "Remote",
+      "bulletFields": ["JR1002"]
+    },
+    {
+      "title": "Old Role (detail unavailable)",
+      "externalPath": "/job/NYC/Old-Role_JR1003",
+      "locationsText": "United States, New York",
+      "postedOn": "Posted 30+ Days Ago",
+      "bulletFields": ["JR1003"]
+    },
+    {
+      "title": "Broken - no path",
+      "externalPath": "",
+      "locationsText": "",
+      "postedOn": "",
+      "bulletFields": []
+    }
+  ]
+}
