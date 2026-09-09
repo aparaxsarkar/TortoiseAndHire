@@ -47,7 +47,7 @@ TortoiseAndHire/
 │   ├── api/
 │   │   ├── deps.py              require_token (bearer), service providers, job_filters query parsing
 │   │   ├── errors.py            ProblemException + handlers → RFC 7807 application/problem+json
-│   │   └── routes/              health · jobs (public) · ingestion (token) · [applications · exports · sources — later]
+│   │   └── routes/              health · jobs (public) · applications · ingestion · exports (token) · [sources — later]
 │   ├── core/
 │   │   ├── config.py            Settings (pydantic-settings), env-only
 │   │   ├── logging.py           structlog: JSON in prod, key=value in dev
@@ -63,11 +63,14 @@ TortoiseAndHire/
 │   ├── schemas/
 │   │   ├── canonical.py         RawPosting, CanonicalPosting — the adapter contract
 │   │   ├── jobs.py              JobFilters (search input) · JobSummary · JobSearchResult
-│   │   ├── ingestion.py         SourceRunResult · IngestionReport (run DTOs)
-│   │   └── ...                  applications · exports (API DTOs — later)
+│   │   ├── ingestion.py         RunRequest · SourceRunResult · IngestionReport · IngestionRunSummary
+│   │   ├── applications.py      ApplicationPatch (user-owned fields only) · ApplicationView
+│   │   └── exports.py           ExportRow · ImportReport (+ per-row result / change)
 │   ├── services/                business logic; owns transactions; returns DTOs, never ORM rows
-│   │   ├── ingestion.py         Repository{SourcePostingSink,FilteredPostingSink,RunStore} (ORM half of the seam) + IngestionService (run_source · run_all)
-│   │   ├── jobs.py              JobService.search / .get — read-side, maps rows → JobSummary
+│   │   ├── ingestion.py         Repository{SourcePostingSink,FilteredPostingSink,RunStore} (ORM half of the seam) + IngestionService
+│   │   ├── jobs.py              JobService.search / .get — read-side
+│   │   ├── applications.py      ApplicationService (get / patch) + write_application (the one mutation path)
+│   │   ├── exports.py           ExportService — snapshot + reconcile the Excel round-trip
 │   │   └── health.py            readiness probe
 │   ├── sources/
 │   │   ├── base.py              JobSource Protocol, SourceQuery, BaseSource lifecycle
@@ -89,9 +92,9 @@ TortoiseAndHire/
 │   │   ├── ruleset.py           Ruleset model + loader for config/discovery.yml (version-stamped)
 │   │   ├── rules.py             evaluate(posting, ruleset) → RelevanceVerdict — deterministic, pure
 │   │   └── experience.py        parse "5+ years" / "3-5 years" / "min 2 years" → min_years
-│   └── exports/
-│       ├── layout.py            the 9 visible columns + hidden job_id / revision
-│       └── excel.py             ExcelExporter.write + .read — openpyxl, no DB
+│   └── exports/                 pure: no db/ models/ services/ (import-linter)
+│       ├── layout.py            the 9 visible columns + hidden job_id / revision; which are editable
+│       └── excel.py             write_workbook / read_workbook — openpyxl only, cell coercion, no DB
 ├── tests/                       unit · integration · api · fixtures
 ├── migrations/                  Alembic (env.py + versions/)
 ├── scripts/                     seed_sources · run_ingestion · export_xlsx · import_applications · reevaluate_filtered
@@ -236,7 +239,18 @@ Routes parse a request, call a service, return a DTO. No DB / sources / ingestio
 | `api.deps.job_filters` | Query params → `JobFilters` (bounds enforced by `Query(ge=…, le=…)`). |
 | `api.errors.ProblemException` | `(status, title, detail?, type?)` — what a route raises for a deliberate 4xx. |
 | `api.errors.install_error_handlers(app)` | Handlers for `ProblemException`, `RequestValidationError` (422), `HTTPException`, `TortoiseError` (uses `exc.http_status`/`http_title`), and `Exception` (500, logged, no leak). |
-| `app.main.create_app` | Now mounts `health` + `jobs` + `ingestion` and installs the handlers. |
+| `app.main.create_app` | Mounts `health` + `jobs` + `applications` + `ingestion` + `exports` and installs the handlers. |
+
+### `applications/` + `exports/` (day 9)
+
+| Symbol | Notes |
+|---|---|
+| `services.applications.write_application` | `(session, job_id, ApplicationPatch, *, via) -> (Application, changed)`. The **only** create/mutate path for `applications` (ADR-0011); the API `PATCH` and the Excel import both call it. New row → `revision 1`; each later change → `+1`, `updated_via = via`, auto-stamp `applied_at` when `applied` flips true and no date was given. |
+| `services.applications.ApplicationService` | `get(job_id) -> ApplicationView` (404 until first patch) · `patch(job_id, ApplicationPatch) -> ApplicationView` (404 on unknown job). Own `session_factory`. |
+| `schemas.applications.ApplicationPatch` | `extra="forbid"`, every field optional, `Literal` enum aliases, rejects an empty body. Carries only user-owned fields. |
+| `exports.layout` | `COLUMNS` (9 visible + `job_id`/`revision` hidden), `EDITABLE_FIELDS`. |
+| `exports.excel.write_workbook` / `read_workbook` | `list[ExportRow] -> bytes` / `bytes -> list[ParsedRow]`. Pure; `read_workbook` coerces cells and puts a bad cell on `ParsedRow.parse_error` rather than raising. A structurally broken file raises `WorkbookError` (→ 422). |
+| `services.exports.ExportService` | `export_xlsx() -> (filename, bytes)` snapshot · `import_xlsx(filename, data, *, commit=False) -> ImportReport`. Reconcile keyed on `job_id`, `revision` guard, dry-run default, atomic + audited commit. |
 
 ## 5. Schema & ERD
 
@@ -272,20 +286,44 @@ including reshaped validation errors and a leak-free catch-all 500.
 | `POST /ingestion/runs` | **token** | `IngestionService.run_source` / `run_all` | body `{source, targets}` **or** `{plan}` (exactly one); runs synchronously, returns `IngestionReport`; unknown slug → 400, unseeded slug → 409 |
 | `GET /ingestion/runs` | **token** | `IngestionService.recent_runs` | `limit` 1–100, newest first |
 | `GET /ingestion/runs/{id}` | **token** | `IngestionService.get_run` | 404 problem if missing |
+| `GET /jobs/{id}/application` | **token** | `ApplicationService.get` | my private record; 404 problem until the first PATCH |
+| `PATCH /jobs/{id}/application` | **token** | `ApplicationService.patch` | body `ApplicationPatch` (user-owned fields only, `extra="forbid"`); creates on first call, bumps `revision` after; empty body → 422 |
+| `GET /exports/xlsx` | **token** | `ExportService.export_xlsx` | streams the snapshot as an `.xlsx` attachment |
+| `POST /exports/import` | **token** | `ExportService.import_xlsx` | `.xlsx` as the **raw body**; `?commit=false` (default) = dry run → `ImportReport`; `?commit=true` applies + audits |
 
-Later: `GET /sources`, `GET`+`PATCH /jobs/{id}/application`, `exports/*`, `metrics` (days 9–10).
+Later: `GET /sources`, `GET /metrics` (day 10).
 The bearer check is a router-level dependency on the protected groups, so it can't be
 forgotten on a new route. Redaction is structural — private data is a separate protected
 endpoint, not an authenticated view of a public one.
 
 ## 8. Excel export & import
 
-PostgreSQL stays the single source of truth (ADR-0005, revised). Excel is a supported *input*
-for the fields I own (`applied`, `networking`, `outcome`, `application_url` override, `notes`),
-through an explicit reviewed import — not a live sync (ADR-0010): keyed on a hidden `job_id`
-column, field-scoped, dry-run by default, revision-guarded against stale writes, never creating
-or deleting anything. Full column mapping and mechanics land here once `app/exports/` exists
-(day 9).
+PostgreSQL is the single source of truth (ADR-0005 revised). Excel is a *view + batch-edit
+form* for the fields I own, applied through a reviewed import (ADR-0010) — never a live sync.
+
+**Layout** (`app/exports/layout.py`) — one row per job:
+
+| Read-only context | Editable (imported back) | Hidden |
+|---|---|---|
+| `Title` · `Company` · `URL` | `Applied` · `Applied At` · `Networking` · `Outcome` · `Application URL` · `Notes` | `job_id` (reconcile key) · `revision` (stale-write guard) |
+
+**Export** — `ExportService.export_xlsx()` snapshots every job + its application state (defaults
+for jobs with no record yet, `revision = 0`). `app/exports/excel.py` does `.xlsx ↔ rows` with
+openpyxl and nothing else.
+
+**Import** — `ExportService.import_xlsx(filename, data, *, commit=False)`:
+
+- keyed on hidden `job_id`; the write goes through `ApplicationPatch` (`extra="forbid"`) so only
+  editable fields can land and a canonical `jobs` field is unwritable (ADR-0011).
+- **dry-run unless `commit=True`** — returns an `ImportReport`: per row `created`/`updated`/
+  `unchanged`/`conflict`/`error`, the field-level `changes`, and `counts`.
+- **revision guard** — sheet `revision` ≠ live `applications.revision` → `conflict`, row skipped
+  even on commit, both numbers reported.
+- unknown `job_id` / bad enum / unparseable cell → an `error` *row*; a non-`.xlsx` or a sheet
+  missing `job_id` → 422 for the whole request.
+- a commit is atomic, bumps `revision`, stamps `updated_via = "excel_import"` (same
+  `write_application` helper as the API `PATCH`), and writes one `application_import_runs` audit
+  row (`filename`, `counts`, full per-row report as JSONB).
 
 ## 9. Deployment
 

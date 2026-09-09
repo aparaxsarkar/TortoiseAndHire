@@ -16,6 +16,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.api.errors import ProblemException
 from app.core.config import Settings, get_settings
 from app.schemas.jobs import JobFilters
+from app.services.applications import ApplicationService
+from app.services.exports import ExportService
 from app.services.ingestion import IngestionService
 from app.services.jobs import JobService
 
@@ -41,6 +43,14 @@ def get_job_service() -> JobService:
 
 def get_ingestion_service() -> IngestionService:
     return IngestionService()
+
+
+def get_application_service() -> ApplicationService:
+    return ApplicationService()
+
+
+def get_export_service() -> ExportService:
+    return ExportService()
 
 
 def job_filters(

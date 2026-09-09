@@ -7,7 +7,8 @@ in `tests/integration/` skips itself - CI provides the service.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 
 import pytest
 from alembic import command
@@ -16,6 +17,8 @@ from sqlalchemy import Connection, Engine, create_engine
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+
+SessionFactory = Callable[[], AbstractContextManager[Session]]
 
 
 def _postgres_available(url: str) -> bool:
@@ -65,3 +68,16 @@ def raw_connection(migrated_engine: Engine) -> Iterator[Connection]:
     """A plain connection for schema introspection queries (pg_catalog etc.)."""
     with migrated_engine.connect() as conn:
         yield conn
+
+
+@pytest.fixture
+def session_factory(db_session: Session) -> SessionFactory:
+    """A `session_factory` that hands services the test's rolled-back session and
+    neither commits nor closes it - lets `IngestionService(...)` / `JobService(...)`
+    / etc. run against the same transaction the test seeds into."""
+
+    @contextmanager
+    def _factory() -> Iterator[Session]:
+        yield db_session
+
+    return _factory
