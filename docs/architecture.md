@@ -47,7 +47,7 @@ TortoiseAndHire/
 │   ├── api/
 │   │   ├── deps.py              require_token (bearer), service providers, job_filters query parsing
 │   │   ├── errors.py            ProblemException + handlers → RFC 7807 application/problem+json
-│   │   └── routes/              health · jobs (public) · applications · ingestion · exports (token) · [sources — later]
+│   │   └── routes/              health · jobs (public) · applications · ingestion · exports · metrics (token)
 │   ├── core/
 │   │   ├── config.py            Settings (pydantic-settings), env-only
 │   │   ├── logging.py           structlog: JSON in prod, key=value in dev
@@ -95,20 +95,21 @@ TortoiseAndHire/
 │   └── exports/                 pure: no db/ models/ services/ (import-linter)
 │       ├── layout.py            the 9 visible columns + hidden job_id / revision; which are editable
 │       └── excel.py             write_workbook / read_workbook — openpyxl only, cell coercion, no DB
-├── tests/                       unit · integration · api · fixtures
-├── migrations/                  Alembic (env.py + versions/)
-├── scripts/                     seed_sources · run_ingestion · export_xlsx · import_applications · reevaluate_filtered
-├── config/discovery.yml         target roles / levels / exclusions — versioned, checked in, not a secret
+├── tests/                       unit · integration (needs Postgres) · api · fixtures
+├── migrations/                  Alembic (env.py + versions/) — run out of band, never on container start
+├── scripts/                     seed_sources · run_ingestion (mypy-strict + ruff, like app/)
+├── config/                      discovery.yml (relevance ruleset) · sources.yml (which boards to scan)
 ├── docs/
 │   ├── architecture.md          this file
-│   ├── data-model.md            written alongside the DB layer (day 3)
-│   ├── runbook.md               written alongside deployment (day 10)
-│   ├── adr/                     0001..0011 decision records
+│   ├── data-model.md            ERD + constraints (day 3)
+│   ├── runbook.md               deploy setup, routine ops, incident playbook (day 10)
+│   ├── adr/                     0001..0006, 0008..0012 decision records
 │   └── reference/               dated third-party reference notes (ADR-0012)
-├── frontend/                    optional minimal React (Vite + TS) — stretch
-├── .github/workflows/           ci.yml · deploy.yml · ingest.yml · nightly-live.yml (added as each becomes real)
-├── docker/Dockerfile · docker-compose.yml
-├── pyproject.toml · alembic.ini · Makefile
+├── .github/workflows/           ci.yml (lint + test) · ingest.yml (6-hourly discovery) · nightly-live.yml
+├── docker/Dockerfile            non-root, carries app/ migrations/ config/ scripts/; CMD = uvicorn only
+├── docker-compose.yml           local Postgres + API
+├── render.yaml                  Render Blueprint (ADR-0006)
+├── pyproject.toml · alembic.ini · Makefile · .dockerignore
 ├── .env.example · .pre-commit-config.yaml
 └── README.md
 ```
@@ -290,8 +291,9 @@ including reshaped validation errors and a leak-free catch-all 500.
 | `PATCH /jobs/{id}/application` | **token** | `ApplicationService.patch` | body `ApplicationPatch` (user-owned fields only, `extra="forbid"`); creates on first call, bumps `revision` after; empty body → 422 |
 | `GET /exports/xlsx` | **token** | `ExportService.export_xlsx` | streams the snapshot as an `.xlsx` attachment |
 | `POST /exports/import` | **token** | `ExportService.import_xlsx` | `.xlsx` as the **raw body**; `?commit=false` (default) = dry run → `ImportReport`; `?commit=true` applies + audits |
+| `GET /metrics` | **token** | `observability.metrics.render_prometheus` | in-process counters + timing, Prometheus text |
 
-Later: `GET /sources`, `GET /metrics` (day 10).
+Later (post-MVP): `GET /sources`.
 The bearer check is a router-level dependency on the protected groups, so it can't be
 forgotten on a new route. Redaction is structural — private data is a separate protected
 endpoint, not an authenticated view of a public one.
@@ -327,24 +329,35 @@ openpyxl and nothing else.
 
 ## 9. Deployment
 
-Neon (Postgres) + Render (API, Docker) + GitHub Actions scheduled workflow (ingestion trigger)
-+ Cloudflare Pages (frontend, stretch). All 12-factor: config from env, stateless containers, DB
-via `DATABASE_URL`. Detailed in `docs/runbook.md` once deployment is set up (day 10, ADR-0006).
+**Neon (Postgres) + one Render Docker `web` service + a GitHub Actions cron** (ADR-0006).
+12-factor: all config from env, the container stateless, DB reached only via `DATABASE_URL`
+(scheme `postgresql+psycopg://`). `render.yaml` is a Render Blueprint; `autoDeploy` on push to
+`main` after CI. Health check is `/api/v1/health/ready` (503 → deploy held).
+
+- **Migrations run out of band, never on container start** — `render.yaml`'s `preDeployCommand`
+  (`alembic upgrade head && python -m scripts.seed_sources`) on paid instances; by hand on free.
+  The `Dockerfile` `CMD` is only `uvicorn`.
+- **Scheduled ingestion is `.github/workflows/ingest.yml`** — every 6h it runs
+  `python -m scripts.run_ingestion` against Neon *directly* (no dependency on the web service
+  being awake), reading the board/account list from `config/sources.yml`. Exits non-zero on any
+  `failed` source. `nightly-live.yml` runs the `@live` adapter tests daily.
+- **Scripts** (`scripts/`, mypy-strict + ruff like `app/`): `seed_sources` (idempotent),
+  `run_ingestion` (cron entrypoint + `make ingest`).
+
+Operational detail — first-time setup, routine ops, incident playbook — is in
+[`docs/runbook.md`](runbook.md).
 
 ## 10. CI/CD & testing
 
-Target pipeline: lint → test → build → deploy, each job added to `.github/workflows/ci.yml` the
-day the code it exercises exists (see ADR-0001's build plan) rather than stubbed ahead of time.
-Present: **`lint`** (day 1 — ruff, ruff-format, mypy `--strict`, import-linter, advisory
-pip-audit) and **`test`** (day 2 — `pytest`; day 3 adds a `postgres:16` service, an
-`alembic upgrade head` / `downgrade base` round-trip, and `alembic check` so the models can
-never drift from the migration). Integration tests under `tests/integration/` skip themselves
-when `DATABASE_URL` is not a reachable `postgresql://` URL. Tests marked `@pytest.mark.live`
-(day 5 — adapter smoke tests against real public boards) are excluded by default via
-`-m 'not live'` in `pyproject.toml`; run them explicitly with `pytest -m live`. Coverage
-gates: ≥ 80% on `app/`, ≥ 95% on `deduplication/`, `discovery/`, and `ingestion/` (the
-correctness-critical core). See
-§10 of the design blueprint (linked from ADR-0001) for the full testing-boundaries table.
+`.github/workflows/ci.yml` (push to `main` + every PR): **`lint`** (ruff + ruff-format +
+mypy `--strict` over `app/` **and `scripts/`** + import-linter + advisory pip-audit) and
+**`test`** (a `postgres:16` service, `alembic upgrade head` / `downgrade base` round-trip,
+`alembic check` so models can't drift from the migration, `pytest --cov`, and a ≥ 95% gate on
+`deduplication/` + `discovery/` + `ingestion/`). Integration tests under `tests/integration/`
+skip themselves when `DATABASE_URL` isn't a reachable `postgresql://` URL. `@pytest.mark.live`
+tests are excluded by `-m 'not live'` and run in **`nightly-live.yml`** instead. Image build +
+deploy is Render's; scheduled discovery is **`ingest.yml`** (§9). See §10 of the design blueprint
+(linked from ADR-0001) for the full testing-boundaries table.
 
 **`pip-audit` is visible, not blocking** (`continue-on-error: true` in the `lint` job). It scans
 against a CVE database that changes independently of this repo's commits — a hard-fail gate on it

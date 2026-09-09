@@ -1,0 +1,41 @@
+name: ingest
+
+# Scheduled discovery: run every configured source through the pipeline.
+# Runs against the database directly (no dependency on the web service being
+# awake) - see ADR-0006. Needs the `DATABASE_URL` repo secret (the Neon pooled
+# string, with the `+psycopg` scheme).
+
+on:
+  schedule:
+    - cron: "23 */6 * * *" # every 6 hours, at :23
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "space-separated source slugs (blank = all configured)"
+        required: false
+        default: ""
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TORTOISEANDHIRE_ENV: production
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Seed the sources table (idempotent)
+        run: python -m scripts.seed_sources
+      - name: Run ingestion
+        run: python -m scripts.run_ingestion ${{ github.event.inputs.sources }}

@@ -1,0 +1,17 @@
+# Which ATS boards / accounts the scheduled ingestion scans.
+# Checked in, not a secret - these are public identifiers. Edit freely.
+#
+#   greenhouse: Greenhouse "board tokens"  -> boards.greenhouse.io/<token>
+#   lever:      Lever account slugs         -> jobs.lever.co/<account>
+#
+# Used by `python -m scripts.run_ingestion` and the `ingest` GitHub Actions
+# workflow. Every key must be a slug from `app.sources.registry.available()`.
+
+version: "2026-09-10.a"
+
+sources:
+  greenhouse:
+    - vercel
+    - anthropic
+  lever:
+    - leverdemo

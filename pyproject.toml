@@ -48,7 +48,7 @@ packages = ["app"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["app", "tests"]
+src = ["app", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
@@ -58,16 +58,16 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 ignore = ["UP042"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "tests"]
+known-first-party = ["app", "tests", "scripts"]
 
 # ---------------------------------------------------------------------------
-# mypy — strict on app/, relaxed on tests/
+# mypy — strict on app/ and scripts/, relaxed on tests/
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
 strict = true
 mypy_path = "."
-files = ["app"]
+files = ["app", "scripts"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]

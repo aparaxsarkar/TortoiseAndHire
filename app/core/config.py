@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     timezone: str = "America/New_York"
     discovery_ruleset_path: str = "config/discovery.yml"
+    sources_config_path: str = "config/sources.yml"
     metrics_enabled: bool = True
 
     @property

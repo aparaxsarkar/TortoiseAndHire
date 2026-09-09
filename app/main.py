@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app.api.errors import install_error_handlers
-from app.api.routes import applications, exports, health, ingestion, jobs
+from app.api.routes import applications, exports, health, ingestion, jobs, metrics
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.observability import TimingMiddleware
@@ -32,6 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         applications.router,
         ingestion.router,
         exports.router,
+        metrics.router,
     ):
         app.include_router(router, prefix=API_V1_PREFIX)
 

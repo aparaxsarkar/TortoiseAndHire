@@ -1,0 +1,30 @@
+# Render Blueprint (ADR-0006). Create the service from this file:
+# Render dashboard -> New -> Blueprint -> pick this repo.
+#
+# DATABASE_URL and TORTOISEANDHIRE_API_TOKEN are `sync: false` - set them in the
+# service's Environment tab (DATABASE_URL is the Neon pooled string, KEEP the
+# "+psycopg" scheme). See docs/runbook.md.
+
+services:
+  - type: web
+    name: tortoiseandhire-api
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    autoDeploy: true
+    healthCheckPath: /api/v1/health/ready
+    # Needs a Starter+ instance. On free, run migrations manually once per schema
+    # change (`alembic upgrade head` from the Render Shell or locally against the
+    # Neon URL) - see the runbook.
+    preDeployCommand: "alembic upgrade head && python -m scripts.seed_sources"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: TORTOISEANDHIRE_API_TOKEN
+        sync: false
+      - key: TORTOISEANDHIRE_ENV
+        value: production
+      - key: TORTOISEANDHIRE_LOG_LEVEL
+        value: INFO

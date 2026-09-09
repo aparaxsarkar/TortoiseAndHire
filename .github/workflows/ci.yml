@@ -20,8 +20,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: ruff check app tests
-      - run: ruff format --check app tests
+      - run: ruff check app tests scripts
+      - run: ruff format --check app tests scripts
       - run: mypy
       - run: lint-imports
       # Visible, not blocking: the CVE database changes independently of our
@@ -66,5 +66,6 @@ jobs:
       - name: Coverage gate - the pure correctness-critical core >= 95%
         run: coverage report --include='app/deduplication/*,app/discovery/*,app/ingestion/*' --fail-under=95
 
-# build / migrations-check jobs are added as the code they exercise lands -
-# see docs/architecture.md §10 and the build plan in ADR-0001.
+# Image build + deploy is Render's (autoDeploy on push to main, `render.yaml`).
+# Scheduled work is in its own workflows: `ingest.yml` (6-hourly discovery),
+# `nightly-live.yml` (real-board adapter smoke tests). See ADR-0006 + the runbook.

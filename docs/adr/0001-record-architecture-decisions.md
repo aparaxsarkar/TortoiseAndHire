@@ -45,9 +45,10 @@ day's ADR if a new locked decision landed.
 | 7 ✓ | `services/`: `IngestionService` (`run_source` / `run_all` — resolve adapter, own the transaction, map to DTOs); `JobService.search` / `.get`; `schemas/jobs` + `schemas/ingestion` DTOs; `JobRepository.search` (filters + pagination, no N+1); `aclose()` added to the `JobSource` protocol | — (wires 0004/0009/0011) |
 | 8 ✓ | API I: `routes/jobs` (public, redacted) + `routes/ingestion` (token); `api/deps` (`require_token`, providers, query parsing); `api/errors` (RFC 7807 problem+json for every path); `TortoiseError` carries `http_status`/`http_title`; `JobService` gets its own `session_factory` so `api/` never imports `db/` | **0008** (server-side-only bearer token) |
 | 9 ✓ | `ApplicationService` + `GET`/`PATCH /jobs/{id}/application` (token); `app/exports/` (pure `layout` + `excel` read/write, openpyxl); `ExportService` + `GET /exports/xlsx` + `POST /exports/import` (raw body, dry-run default, `revision` guard, `application_import_runs` audit); `write_application` is the single mutation path | **0005** (revised — Excel is round-trip input), **0010** (dry-run + revision guard) |
-| 10 | Deploy: Neon, Render, Actions cron, runbook | 0006 (deployment) |
+| 10 ✓ | Deploy: `docker/Dockerfile` (non-root, carries `config/` + `scripts/`) + `.dockerignore` + `render.yaml`; `scripts/seed_sources` + `scripts/run_ingestion` (mypy-strict + ruff); `.github/workflows/ingest.yml` (6-hourly, hits Neon directly) + `nightly-live.yml`; `GET /metrics` (token); `config/sources.yml`; `docs/runbook.md` | **0006** (Neon + Render + Actions cron) |
 
-(Cross-source dedup suggestions, if built, get ADR-0007 when that stretch work starts.)
+**MVP build plan complete.** Post-MVP: cross-source dedup suggestions get ADR-0007 if that
+stretch work starts; a minimal React frontend and `GET /sources` are also deferred.
 
 ## Consequences
 - Every non-obvious constraint in the code (a `RESTRICT` instead of `CASCADE`, a filter that

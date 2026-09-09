@@ -1,13 +1,13 @@
-.PHONY: install lint format typecheck imports test test-cov up down run migrate revision clean
+.PHONY: install lint format typecheck imports test test-cov up down run migrate revision seed ingest docker-build clean
 
 install:
 	pip install -e ".[dev]"
 
 lint:
-	ruff check app tests
+	ruff check app tests scripts
 
 format:
-	ruff format app tests
+	ruff format app tests scripts
 
 typecheck:
 	mypy
@@ -35,6 +35,15 @@ migrate:
 
 revision:
 	alembic revision --autogenerate -m "$(m)"
+
+seed:
+	python -m scripts.seed_sources
+
+ingest:
+	python -m scripts.run_ingestion $(s)
+
+docker-build:
+	docker build -f docker/Dockerfile -t tortoiseandhire:local .
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
