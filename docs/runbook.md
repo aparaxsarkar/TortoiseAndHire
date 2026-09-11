@@ -9,7 +9,7 @@ Operational guide for the deployed system. Design rationale is in
 |---|---|---|
 | PostgreSQL | Neon (managed) | always on |
 | API (`uvicorn app.main:app`) | Render, one Docker `web` service | HTTP; free plan spins down when idle |
-| Scheduled ingestion | GitHub Actions `ingest.yml` | cron every 6h + manual `workflow_dispatch` |
+| Scheduled ingestion | GitHub Actions `ingest.yml` | **schedule currently paused** (needs the `DATABASE_URL` secret first — step 4 below); manual `workflow_dispatch` always works once the secret is set |
 | Live adapter smoke tests | GitHub Actions `nightly-live.yml` | cron daily 08:00 UTC |
 | Build + deploy | Render `autoDeploy` | push to `main` (after CI passes) |
 
@@ -44,8 +44,15 @@ Full list with local defaults: `.env.example`.
    `preDeployCommand` re-runs migrations + seed (idempotent), on free it's a
    no-op (step 2 already covered it).
 4. **GitHub** — repo Settings → Secrets and variables → Actions → add
-   `DATABASE_URL` (same Neon string). The `ingest` and `nightly-live` workflows
-   now run on schedule; kick one manually from the Actions tab to confirm.
+   `DATABASE_URL` (same Neon string). `ingest.yml`'s `schedule` trigger ships
+   **commented out** on purpose (see the comment at the top of the file) —
+   without this secret it just fails instantly every time it fires (that's what
+   happened for ~2 days before this was noticed: the job falls back to the
+   local-dev default `localhost:5432`, which doesn't exist in the runner, and a
+   refused connection is near-instant). Once the secret is set: run `ingest`
+   once via Actions → "Run workflow" to confirm it seeds + ingests cleanly, then
+   uncomment the `schedule:` block in `.github/workflows/ingest.yml` and push.
+   `nightly-live.yml` needs no secret and already runs on schedule.
 5. **Edit `config/sources.yml`** — the Greenhouse board tokens / Lever account
    slugs you actually want scanned. Commit; the next `ingest` run picks it up.
 
@@ -81,7 +88,7 @@ Full list with local defaults: `.env.example`.
 |---|---|---|
 | API returns 5xx / won't start | Render logs; `GET /health/ready` | Bad env var (usually `DATABASE_URL` scheme or a Neon outage) → correct + redeploy. Bad deploy → redeploy the previous commit from Render, or `git revert` + push. |
 | `GET /health/ready` = 503 but process up | Neon status; the `DATABASE_URL` value | Neon paused/over quota, or a wrong string. Render keeps traffic off a 503 instance. |
-| `ingest` workflow red | the run's log — which source, `status: failed` and `error_summary` | Adapter breakage (see `nightly-live`) → fix the adapter. Transient (`SourceUnavailable`) → it retried; re-run the workflow. `IngestionSetupError` → sources not seeded → run `scripts.seed_sources`. |
+| `ingest` workflow red | the run's log — which source, `status: failed` and `error_summary` | Adapter breakage (see `nightly-live`) → fix the adapter. Transient (`SourceUnavailable`) → it retried; re-run the workflow. `IngestionSetupError` → sources not seeded → run `scripts.seed_sources`. Fails in ~1s at "Confirm DATABASE_URL is configured" or the seed step → the secret is missing/wrong; see First-time setup step 4 (this is why the `schedule` trigger ships commented out until then). |
 | `nightly-live` red | which board, the assertion | A board changed its JSON shape → update the adapter + its fixtures; unit tests stay green until you do. |
 | Ingestion silently doing nothing | `config/sources.yml` has real tokens; `ingestion_runs` for recent rows | Empty/placeholder config, or every posting filtered (`filtered_out` high) → tune `config/discovery.yml` and bump its `version`. |
 | Need to undo a migration | — | `DATABASE_URL='…' python -m alembic downgrade -1` (same out-of-band path it went up). CI's `downgrade base`/`upgrade head` round-trip means every revision is reversible. |

@@ -4,10 +4,20 @@ name: ingest
 # Runs against the database directly (no dependency on the web service being
 # awake) - see ADR-0006. Needs the `DATABASE_URL` repo secret (the Neon pooled
 # string, with the `+psycopg` scheme).
+#
+# The `schedule` trigger is paused (commented out below) until that secret is
+# actually set - Settings.database_url falls back to the local-dev default
+# (postgres@localhost:5432) otherwise, which fails instantly against a runner
+# with no Postgres. That's what happened every 6h from 2026-09-09 to 2026-09-11:
+# ~130 failing runs, all dying in ~1s at the seed step (connection refused).
+#
+# To go live: add the DATABASE_URL secret (repo Settings -> Secrets and
+# variables -> Actions), run this once via "Run workflow" below to confirm it
+# seeds + ingests cleanly, then uncomment the `schedule:` block and push.
 
 on:
-  schedule:
-    - cron: "23 */6 * * *" # every 6 hours, at :23
+  # schedule:
+  #   - cron: "23 */6 * * *" # every 6 hours, at :23
   workflow_dispatch:
     inputs:
       sources:
@@ -35,6 +45,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
+      - name: Confirm DATABASE_URL is configured
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL is empty - add it under repo Settings > Secrets and" \
+                 "variables > Actions before enabling this workflow. See docs/runbook.md."
+            exit 1
+          fi
       - name: Seed the sources table (idempotent)
         run: python -m scripts.seed_sources
       - name: Run ingestion
