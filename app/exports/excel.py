@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
@@ -108,7 +109,22 @@ def _as_enum_text(value: Any) -> str:
     return _as_text(value) or "none"
 
 
+def _as_url(value: Any) -> str | None:
+    # blank means "leave as-is" (canonical_url is NOT NULL); garbage is rejected
+    # outright rather than silently corrupting a working link.
+    text = _as_text(value)
+    if text is None:
+        return None
+    parsed = urlsplit(text)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise WorkbookError(f"{text!r} is not a valid http(s) URL")
+    return text
+
+
 _COERCE: dict[str, Callable[[Any], Any]] = {
+    "title": _as_text,
+    "company_name": _as_text,
+    "url": _as_url,
     "applied": _as_applied,
     "applied_at": _as_datetime,
     "networking": _as_enum_text,

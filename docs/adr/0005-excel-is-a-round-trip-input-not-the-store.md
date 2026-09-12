@@ -19,16 +19,19 @@ left the door open to Excel being *the* store, or a one-way dump. Both are wrong
 handful of fields I own, applied through an explicit, reviewed import.**
 
 - **Export** (`GET /exports/xlsx`, `ExportService.export_xlsx`) writes one row per
-  job: read-only context (`Title`, `Company`, `URL`) + the editable application
+  job: read-only context (`Title`, `Company`, `URL` — **superseded 2026-09-12,
+  see the addendum**) + the editable application
   fields (`Applied`, `Applied At`, `Networking`, `Outcome`, `Application URL`,
   `Notes`) + two **hidden** columns, `job_id` and `revision`. Column layout is one
   place: `app/exports/layout.py`.
 - **Import** (`POST /exports/import`, `ExportService.import_xlsx`):
   - **keyed on the hidden `job_id`** — never on title/company text.
   - **field-scoped** — only the `editable` columns are read back; a changed
-    `Title` or `URL` cell is ignored. The write goes through `ApplicationPatch`
-    (`extra="forbid"`), so a canonical `jobs` field is structurally unwritable
-    (ADR-0011).
+    `Title` or `URL` cell is ignored (**superseded 2026-09-12 — see the
+    addendum: they're editable now, applied through a separate mechanism**).
+    An application-field write goes through `ApplicationPatch` (`extra="forbid"`),
+    so a canonical `jobs` field remains unwritable *through that struct*
+    (ADR-0011, as narrowed by ADR-0013).
   - **never creates a job and never deletes anything.** An unknown `job_id` is an
     `error` row, reported, skipped.
   - `xlsx` is uploaded as the **raw request body** (`curl --data-binary @f.xlsx`) —
@@ -43,3 +46,10 @@ handful of fields I own, applied through an explicit, reviewed import.**
   reconcile lives in `ExportService`.
 - Re-importing an untouched export is a no-op — every row reports `unchanged`.
 - Adding a column later is a `layout.py` edit plus deciding `editable=`.
+
+## Addendum — 2026-09-12: Title/Company/URL are also editable (ADR-0013)
+
+Not read-only context anymore. They round-trip like the application fields, but
+write to `jobs`/`companies`/`source_postings` instead of `applications`, and are
+reported as a distinct `canonical_changes` list — never folded into an ordinary
+application-field update. See ADR-0013.

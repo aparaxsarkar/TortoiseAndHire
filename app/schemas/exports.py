@@ -1,8 +1,10 @@
-"""DTOs for the Excel round-trip (ADR-0005 revised, ADR-0010).
+"""DTOs for the Excel round-trip (ADR-0005 revised, ADR-0010, ADR-0013).
 
 `ExportRow` is one spreadsheet row on the way out. `ImportReport` is what a
 `POST /exports/import` returns - a per-row account of what a commit would (or
-did) change.
+did) change. `changes` are ordinary application-field edits; `canonical_changes`
+(Title/Company/URL - ADR-0013) are reported and counted separately so they
+can't be missed inside a routine status update.
 """
 
 from __future__ import annotations
@@ -39,8 +41,9 @@ class ImportRowChange(BaseModel):
 class ImportRowResult(BaseModel):
     row: int  # 1-based spreadsheet row number
     job_id: uuid.UUID | None = None
-    action: RowAction
+    action: RowAction  # describes the `applications` row only - see canonical_changes
     changes: list[ImportRowChange] = Field(default_factory=list)
+    canonical_changes: list[ImportRowChange] = Field(default_factory=list)
     message: str | None = None
 
 
@@ -48,4 +51,5 @@ class ImportReport(BaseModel):
     filename: str
     committed: bool
     counts: dict[RowAction, int]
+    canonical_change_count: int = 0  # rows with a Title/Company/URL edit - always worth a look
     rows: list[ImportRowResult]

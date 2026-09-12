@@ -11,6 +11,7 @@ from app.exports.excel import (
     WorkbookError,
     _as_bool,
     _as_datetime,
+    _as_url,
     read_workbook,
     write_workbook,
 )
@@ -74,6 +75,9 @@ def test_round_trips_a_row() -> None:
     assert r.values["outcome"] == "screen"
     assert r.values["application_url"] == "https://acme.com/apply/1"
     assert r.values["notes"] == "referred by Sam"
+    assert r.values["title"] == "ML Engineer"
+    assert r.values["company_name"] == "Acme"
+    assert r.values["url"] == "https://boards.greenhouse.io/acme/1"
     assert r.parse_error is None
 
 
@@ -169,3 +173,43 @@ def test_as_datetime_variants() -> None:
     assert _as_datetime("2026-09-01T08:30:00") == dt.datetime(2026, 9, 1, 8, 30, tzinfo=dt.UTC)
     with pytest.raises(WorkbookError, match="date/time"):
         _as_datetime("last tuesday")
+
+
+# --- ADR-0013: Title / Company / URL are now editable ----------------------
+
+
+def test_blank_canonical_cells_mean_leave_as_is() -> None:
+    data = write_workbook([_row()])
+    ws = load_workbook(io.BytesIO(data))
+    for col in ("A", "B", "C"):  # Title, Company, URL
+        ws["Applications"][f"{col}2"] = None
+    buf = io.BytesIO()
+    ws.save(buf)
+
+    values = read_workbook(buf.getvalue())[0].values
+    assert values["title"] is None
+    assert values["company_name"] is None
+    assert values["url"] is None
+
+
+def test_an_invalid_url_cell_is_a_parse_error_not_an_exception() -> None:
+    data = write_workbook([_row()])
+    ws = load_workbook(io.BytesIO(data))
+    ws["Applications"]["C2"] = "definitely not a url"  # the URL column
+    buf = io.BytesIO()
+    ws.save(buf)
+
+    parsed = read_workbook(buf.getvalue())
+    assert parsed[0].parse_error is not None
+    assert "URL" in parsed[0].parse_error
+
+
+def test_as_url_variants() -> None:
+    assert _as_url(None) is None
+    assert _as_url("") is None
+    assert _as_url("https://boards.greenhouse.io/acme/1") == "https://boards.greenhouse.io/acme/1"
+    assert _as_url("http://example.com") == "http://example.com"
+    with pytest.raises(WorkbookError, match="valid http"):
+        _as_url("not a url")
+    with pytest.raises(WorkbookError, match="valid http"):
+        _as_url("ftp://example.com/file")

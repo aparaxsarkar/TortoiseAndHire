@@ -106,3 +106,30 @@ def test_garbage_upload_is_a_422_problem(client: TestClient) -> None:
     resp = client.post("/api/v1/exports/import", headers=AUTH, content=b"nonsense")
     assert resp.status_code == 422
     assert resp.headers["content-type"].startswith("application/problem+json")
+
+
+def test_a_title_correction_is_flagged_and_applied_separately(
+    client: TestClient, db_session: Session
+) -> None:
+    job_id = _seed(db_session)
+    xlsx = client.get("/api/v1/exports/xlsx", headers=AUTH).content
+
+    wb = load_workbook(io.BytesIO(xlsx))
+    ws = wb["Applications"]
+    headers = [c.value for c in next(ws.iter_rows(max_row=1))]
+    ws.cell(row=2, column=headers.index("Title") + 1, value="Machine Learning Engineer")
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    resp = client.post("/api/v1/exports/import?commit=true", headers=AUTH, content=buf.getvalue())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["canonical_change_count"] == 1
+    row = body["rows"][0]
+    assert row["action"] == "unchanged"  # no application field changed
+    assert row["canonical_changes"] == [
+        {"field": "title", "old": "ML Engineer", "new": "Machine Learning Engineer"}
+    ]
+
+    job = db_session.get(Job, job_id)
+    assert job.title == "Machine Learning Engineer"

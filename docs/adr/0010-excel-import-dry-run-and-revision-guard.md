@@ -47,3 +47,13 @@ can go wrong with a spreadsheet edited by hand over days:
   stale sheet under `commit=true`, assert the row is untouched.
 - `revision` is monotonic per application and is the same number the API `PATCH`
   advances — one meaning, two writers.
+
+## Addendum — 2026-09-12: canonical-field edits use this same gate, minus the lock (ADR-0013)
+
+Title/Company/URL corrections go through the identical dry-run-then-`commit=true`
+cycle described above — no new endpoint, no new flag. What they *don't* get is the
+`revision` guard: there's no revision counter on `jobs`, so a canonical diff is
+always computed against whatever's live at import time. Reported separately
+(`canonical_changes` / `canonical_change_count`) precisely so this different,
+slightly weaker guarantee is never mistaken for the revision-guarded kind. See
+ADR-0013.

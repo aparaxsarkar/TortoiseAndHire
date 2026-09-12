@@ -8,7 +8,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.models import SourcePosting
+from app.models import Source, SourcePosting
 
 
 class UpsertOutcome(str, enum.Enum):
@@ -44,6 +44,19 @@ class SourcePostingRepository:
                 SourcePosting.dedup_key == dedup_key,
             )
         ).scalar_one_or_none()
+
+    def list_for_job(self, job_id: uuid.UUID) -> list[SourcePosting]:
+        """Every posting linked to this job, ordered by source slug - the same
+        order `JobRepository.source_links_for` uses, so `[0]` here matches
+        what the Excel export showed as *the* URL (ADR-0013)."""
+        return list(
+            self.session.execute(
+                select(SourcePosting)
+                .join(Source, Source.id == SourcePosting.source_id)
+                .where(SourcePosting.job_id == job_id)
+                .order_by(Source.slug)
+            ).scalars()
+        )
 
     def upsert(
         self,

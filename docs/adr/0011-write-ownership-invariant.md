@@ -50,3 +50,14 @@ against a bug.
   set to `closed`, not `DELETE`d), so `RESTRICT` never actually blocks normal operation.
 - `updated_at` is maintained by SQLAlchemy's `onupdate`, not a trigger — consistent with
   rule 3.
+
+## Addendum — 2026-09-12: one narrow, explicit exception (ADR-0013)
+
+Rule 2's "never modify a canonical field" now has exactly one carve-out: the Excel
+import path (only) may correct `jobs.title`, `jobs.company_id` (by reassignment, never
+renaming the shared `companies` row), and — when a job has exactly one linked posting —
+that posting's `canonical_url`, on explicit `commit=true` approval, reported separately
+from ordinary application-field changes so it can't hide inside one. `dedup_key` is never
+touched. Every other write path (the API `PATCH`, ingestion) is exactly as before this
+addendum. See ADR-0013 for the full reasoning and the accepted limitations (no revision
+lock on these fields; a later real re-ingestion can still overwrite the correction).

@@ -47,11 +47,14 @@ day's ADR if a new locked decision landed.
 | 9 ✓ | `ApplicationService` + `GET`/`PATCH /jobs/{id}/application` (token); `app/exports/` (pure `layout` + `excel` read/write, openpyxl); `ExportService` + `GET /exports/xlsx` + `POST /exports/import` (raw body, dry-run default, `revision` guard, `application_import_runs` audit); `write_application` is the single mutation path | **0005** (revised — Excel is round-trip input), **0010** (dry-run + revision guard) |
 | 10 ✓ | Deploy: `docker/Dockerfile` (non-root, carries `config/` + `scripts/`) + `.dockerignore` + `render.yaml`; `scripts/seed_sources` + `scripts/run_ingestion` (mypy-strict + ruff); `.github/workflows/ingest.yml` (6-hourly, hits Neon directly) + `nightly-live.yml`; `GET /metrics` (token); `config/sources.yml`; `docs/runbook.md` | **0006** (Neon + Render + Actions cron) |
 
-**MVP build plan complete.** Post-MVP work extends existing ADRs rather than adding new ones:
+**MVP build plan complete.** Post-MVP work mostly extends existing ADRs in place rather than adding
+new ones; the one exception (Excel canonical-field edits) genuinely narrows a standing invariant and
+so got its own numbered ADR instead of quietly editing ADR-0011:
 
 | Extension | Notes |
 |---|---|
 | Ashby + Workday adapters (2026-09-11) | Same `JobSource` contract; `HttpClient` gained `post_json` for Workday's POST list endpoint; Workday target is `tenant:shard:site`. See the ADR-0004 addendum. |
+| Excel may correct canonical fields (2026-09-12) | `Title`/`Company`/`URL` become editable in the export, applied through the same dry-run/`commit` gate but reported as `canonical_changes`, separate from ordinary application-field `changes`. New **ADR-0013** narrows ADR-0011's rule 2 for this one path; see the addendums on ADR-0005, ADR-0010, and ADR-0011. |
 
 Still deferred: cross-source dedup suggestions (would get ADR-0007), a minimal React frontend,
 `GET /sources`.

@@ -251,9 +251,10 @@ Routes parse a request, call a service, return a DTO. No DB / sources / ingestio
 | `services.applications.write_application` | `(session, job_id, ApplicationPatch, *, via) -> (Application, changed)`. The **only** create/mutate path for `applications` (ADR-0011); the API `PATCH` and the Excel import both call it. New row → `revision 1`; each later change → `+1`, `updated_via = via`, auto-stamp `applied_at` when `applied` flips true and no date was given. |
 | `services.applications.ApplicationService` | `get(job_id) -> ApplicationView` (404 until first patch) · `patch(job_id, ApplicationPatch) -> ApplicationView` (404 on unknown job). Own `session_factory`. |
 | `schemas.applications.ApplicationPatch` | `extra="forbid"`, every field optional, `Literal` enum aliases, rejects an empty body. Carries only user-owned fields. |
-| `exports.layout` | `COLUMNS` (9 visible + `job_id`/`revision` hidden), `EDITABLE_FIELDS`. |
-| `exports.excel.write_workbook` / `read_workbook` | `list[ExportRow] -> bytes` / `bytes -> list[ParsedRow]`. Pure; `read_workbook` coerces cells and puts a bad cell on `ParsedRow.parse_error` rather than raising. A structurally broken file raises `WorkbookError` (→ 422). |
-| `services.exports.ExportService` | `export_xlsx() -> (filename, bytes)` snapshot · `import_xlsx(filename, data, *, commit=False) -> ImportReport`. Reconcile keyed on `job_id`, `revision` guard, dry-run default, atomic + audited commit. |
+| `exports.layout` | `COLUMNS` (9 visible + `job_id`/`revision` hidden), each tagged `editable` and (for `Title`/`Company`/`URL`) `canonical=True` (ADR-0013). `APPLICATION_FIELDS` / `CANONICAL_FIELDS` split the two write targets; `EDITABLE_COLUMNS` is still the full round-tripping set. |
+| `exports.excel.write_workbook` / `read_workbook` | `list[ExportRow] -> bytes` / `bytes -> list[ParsedRow]`. Pure; `read_workbook` coerces cells (incl. `_as_url` for the URL column) and puts a bad cell on `ParsedRow.parse_error` rather than raising. A structurally broken file raises `WorkbookError` (→ 422). |
+| `services.exports.ExportService` | `export_xlsx() -> (filename, bytes)` snapshot · `import_xlsx(filename, data, *, commit=False) -> ImportReport`. Reconciles two independent diffs per row: `changes` against `applications` (via `write_application`, `revision`-guarded) and `canonical_changes` against `jobs`/`companies`/`source_postings` (via `_apply_canonical`, no revision lock — ADR-0013). `action` reflects only the `applications` outcome. |
+| `db.repositories.source_postings.SourcePostingRepository.list_for_job` | Every posting for a job, ordered by source slug — same order as `JobRepository.source_links_for`, so "the first posting" means the same thing at export and import (ADR-0013). |
 
 ## 5. Schema & ERD
 
@@ -292,7 +293,7 @@ including reshaped validation errors and a leak-free catch-all 500.
 | `GET /jobs/{id}/application` | **token** | `ApplicationService.get` | my private record; 404 problem until the first PATCH |
 | `PATCH /jobs/{id}/application` | **token** | `ApplicationService.patch` | body `ApplicationPatch` (user-owned fields only, `extra="forbid"`); creates on first call, bumps `revision` after; empty body → 422 |
 | `GET /exports/xlsx` | **token** | `ExportService.export_xlsx` | streams the snapshot as an `.xlsx` attachment |
-| `POST /exports/import` | **token** | `ExportService.import_xlsx` | `.xlsx` as the **raw body**; `?commit=false` (default) = dry run → `ImportReport`; `?commit=true` applies + audits |
+| `POST /exports/import` | **token** | `ExportService.import_xlsx` | `.xlsx` as the **raw body**; `?commit=false` (default) = dry run → `ImportReport`; `?commit=true` applies + audits. Report separates ordinary `changes` from canonical `Title`/`Company`/`URL` `canonical_changes` (+ `canonical_change_count`) — ADR-0013 |
 | `GET /metrics` | **token** | `observability.metrics.render_prometheus` | in-process counters + timing, Prometheus text |
 
 Later (post-MVP): `GET /sources`.
@@ -304,12 +305,13 @@ endpoint, not an authenticated view of a public one.
 
 PostgreSQL is the single source of truth (ADR-0005 revised). Excel is a *view + batch-edit
 form* for the fields I own, applied through a reviewed import (ADR-0010) — never a live sync.
+Two kinds of column round-trip, reconciled and reported independently (ADR-0013):
 
 **Layout** (`app/exports/layout.py`) — one row per job:
 
-| Read-only context | Editable (imported back) | Hidden |
+| Application (writes `applications`) | Canonical (writes `jobs`/`companies`/`source_postings`) | Hidden |
 |---|---|---|
-| `Title` · `Company` · `URL` | `Applied` · `Applied At` · `Networking` · `Outcome` · `Application URL` · `Notes` | `job_id` (reconcile key) · `revision` (stale-write guard) |
+| `Applied` · `Applied At` · `Networking` · `Outcome` · `Application URL` · `Notes` | `Title` · `Company` · `URL` | `job_id` (reconcile key) · `revision` (application-field stale-write guard only) |
 
 **Export** — `ExportService.export_xlsx()` snapshots every job + its application state (defaults
 for jobs with no record yet, `revision = 0`). `app/exports/excel.py` does `.xlsx ↔ rows` with
@@ -317,17 +319,28 @@ openpyxl and nothing else.
 
 **Import** — `ExportService.import_xlsx(filename, data, *, commit=False)`:
 
-- keyed on hidden `job_id`; the write goes through `ApplicationPatch` (`extra="forbid"`) so only
-  editable fields can land and a canonical `jobs` field is unwritable (ADR-0011).
-- **dry-run unless `commit=True`** — returns an `ImportReport`: per row `created`/`updated`/
-  `unchanged`/`conflict`/`error`, the field-level `changes`, and `counts`.
-- **revision guard** — sheet `revision` ≠ live `applications.revision` → `conflict`, row skipped
-  even on commit, both numbers reported.
-- unknown `job_id` / bad enum / unparseable cell → an `error` *row*; a non-`.xlsx` or a sheet
-  missing `job_id` → 422 for the whole request.
-- a commit is atomic, bumps `revision`, stamps `updated_via = "excel_import"` (same
-  `write_application` helper as the API `PATCH`), and writes one `application_import_runs` audit
-  row (`filename`, `counts`, full per-row report as JSONB).
+- keyed on hidden `job_id`. **Application fields** write through `ApplicationPatch`
+  (`extra="forbid"`, ADR-0011) — the same `write_application` helper the API `PATCH` uses,
+  revision-guarded, reported as `changes`. **Canonical fields** write directly to
+  `jobs`/`companies`/`source_postings` — no revision lock, reported separately as
+  `canonical_changes` (+ a report-level `canonical_change_count`) so a job-record correction is
+  never mistaken for routine status housekeeping (ADR-0013). `action` describes only the
+  `applications` row's fate; a row can be `"unchanged"` there while still carrying a
+  `canonical_changes` entry that gets applied.
+- **dry-run unless `commit=True`** — returns an `ImportReport`: per row `action`
+  (`created`/`updated`/`unchanged`/`conflict`/`error`), `changes`, `canonical_changes`, `counts`.
+- **revision guard (application fields only)** — sheet `revision` ≠ live `applications.revision`
+  → `conflict`, the whole row skipped even on commit, both numbers reported. Canonical fields have
+  no such lock — the diff is always against whatever's live at import time (a known, documented
+  gap, not a silent one).
+- **Company reassigns, never renames** — `CompanyRepository.get_or_create` by the new name,
+  `jobs.company_id` repointed; the shared `companies` row is never edited in place.
+- **URL applies only with exactly one linked `source_posting`** — otherwise ignored with a
+  `message`, not an error. Writes `canonical_url` only; `dedup_key` is never touched (ADR-0002).
+- unknown `job_id` / bad enum / unparseable or invalid-URL cell → an `error` *row*; a non-`.xlsx`
+  or a sheet missing `job_id` → 422 for the whole request.
+- a commit is atomic and writes one `application_import_runs` audit row (`filename`, `counts`,
+  full per-row report as JSONB) covering both kinds of change.
 
 ## 9. Deployment
 
